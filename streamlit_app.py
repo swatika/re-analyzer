@@ -1,8 +1,8 @@
 """
-RE Investment Analyzer — Streamlit Web App
-==========================================
-Web interface for Austin TX real estate investment analysis.
-Uses Austin Permits API + Redfin CSV API (TCAD requires local Playwright).
+Austin Deal Analyzer PRO — Streamlit Web App
+=============================================
+Combined due diligence + financial modeling + BUY/DON'T BUY recommendation.
+Pulls real market data, runs scenario analysis, and gives a clear verdict.
 """
 
 import streamlit as st
@@ -10,14 +10,15 @@ import requests
 import re
 import io
 import csv
+import numpy as np
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional
 
 # ── Page Config ──
 st.set_page_config(
-    page_title="Austin RE Investment Analyzer",
-    page_icon="🏠",
+    page_title="Austin Deal Analyzer PRO",
+    page_icon="🏡",
     layout="wide",
 )
 
@@ -389,60 +390,301 @@ def extract_street_name(address: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-#  STREAMLIT UI
+#  STREAMLIT UI — Combined Due Diligence + Financial Modeling
 # ══════════════════════════════════════════════════════════════
 
-st.title("🏠 Austin RE Investment Analyzer")
-st.caption("Automated due diligence using TCAD, Austin permits & Redfin comps")
+st.title("🏡 Austin Deal Analyzer PRO")
+st.caption("Real market data + financial modeling → **Should you buy or not?**")
 
 # ── Sidebar: Input Form ──
 with st.sidebar:
-    st.header("📋 Deal Parameters")
+    st.header("📥 Deal Inputs")
 
     with st.form("deal_form"):
+        st.subheader("🏠 Property")
         address = st.text_input("Property Address", placeholder="e.g., 1309 Perez St")
         zip_code = st.text_input("ZIP Code", placeholder="e.g., 78721")
 
         st.divider()
-        st.subheader("Deal Numbers (optional)")
-        purchase_price = st.number_input("Purchase Price ($)", min_value=0, value=0, step=50000)
-        build_sf = st.number_input("Build Size (sf)", min_value=0, value=0, step=500)
-        exit_psf = st.number_input("Exit Price ($/sf)", min_value=0, value=0, step=25)
+        st.subheader("💵 Deal Numbers")
+        purchase_price = st.number_input("Purchase Price ($)", min_value=0, value=500000, step=25000)
+        build_sf = st.number_input("Total Build Size (sf)", min_value=0, value=6400, step=500)
+        units = st.number_input("Number of Units", min_value=1, value=4, step=1)
         build_cost_psf = st.number_input("Build Cost ($/sf)", min_value=0, value=250, step=25)
+        exit_psf = st.number_input("Exit Price ($/sf)", min_value=0, value=380, step=10)
 
-        submitted = st.form_submit_button("🔍 Analyze Deal", use_container_width=True, type="primary")
+        st.divider()
+        st.subheader("💰 Financing")
+        ltv = st.slider("Loan to Value (%)", 0, 80, 60)
+        interest_rate = st.slider("Interest Rate (%)", 3.0, 12.0, 7.0, step=0.5)
 
-    st.divider()
-    st.caption("**Data Sources**")
-    st.caption("✅ Austin Permits API")
-    st.caption("✅ Redfin CSV API")
-    st.caption("⚠ TCAD — run CLI locally")
+        st.divider()
+        st.subheader("📅 Timeline")
+        timeline_years = st.slider("Project Timeline (Years)", 1.0, 3.0, 2.0, step=0.5)
+        delay_months = st.slider("Expected Delays (months)", 0, 12, 3)
+
+        st.divider()
+        st.subheader("🏘️ Rental (Hold Strategy)")
+        rent_per_unit = st.number_input("Monthly Rent / Unit ($)", min_value=0, value=1800, step=100)
+
+        st.divider()
+        st.subheader("📉 Market Risk")
+        price_decline = st.slider("Annual Price Change (%)", -15, 10, -5)
+
+        submitted = st.form_submit_button("🔍 Analyze — Should I Buy?", use_container_width=True, type="primary")
+
 
 # ── Main Content ──
 if submitted and address and zip_code:
     street_name = extract_street_name(address)
 
-    with st.spinner(f"Analyzing {address}, {zip_code}..."):
+    # ══════════════════════════════════════════════
+    # STEP 1: Pull real market data
+    # ══════════════════════════════════════════════
+    with st.spinner(f"Pulling real market data for {address}, {zip_code}..."):
         result = run_analysis(address, zip_code, street_name)
 
-    # ── Source Status Badges ──
-    cols = st.columns(3)
-    with cols[0]:
-        permit_count = len(result.street_permits)
-        st.metric("Street Permits", permit_count, delta=f"{len([p for p in result.street_permits if p.status == 'Active'])} active")
-    with cols[1]:
-        st.metric("Zip Permits", len(result.zip_permits))
-    with cols[2]:
-        comp_count = len(result.redfin_comps)
-        median = result.market_stats.get("median_psf", 0)
-        st.metric("Redfin Comps", comp_count, delta=f"${median}/sf median" if median else None)
+    # ══════════════════════════════════════════════
+    # STEP 2: Financial calculations
+    # ══════════════════════════════════════════════
+    total_build_cost = build_cost_psf * build_sf
+    total_project_cost = purchase_price + total_build_cost
+    loan_amount = total_project_cost * (ltv / 100)
+    equity = total_project_cost - loan_amount
+    interest_cost = loan_amount * (interest_rate / 100) * timeline_years
+    monthly_burn = loan_amount * (interest_rate / 100) / 12
+    delay_cost = monthly_burn * delay_months
 
-    st.divider()
+    # Use REAL market median if available, otherwise use user's exit assumption
+    median_psf = result.market_stats.get("median_psf", 0)
+    market_exit = median_psf if median_psf > 0 else exit_psf
 
-    # ── Tabs ──
-    tab_comps, tab_permits, tab_analysis, tab_download = st.tabs([
-        "📊 Sold Comps", "🏗️ Permits", "💰 Deal Analysis", "📄 Download Report"
+    # Adjusted exit with market trend
+    price_change_rate = price_decline / 100
+    adjusted_exit = market_exit * ((1 + price_change_rate) ** timeline_years)
+    adjusted_revenue = adjusted_exit * build_sf
+    user_revenue = exit_psf * build_sf
+
+    total_cost = total_project_cost + interest_cost + delay_cost + (total_build_cost * 0.08)  # 8% contingency
+    market_profit = adjusted_revenue - total_cost
+    user_profit = user_revenue - total_cost
+
+    annual_rent = rent_per_unit * 12 * units
+    cash_yield = (annual_rent / equity * 100) if equity > 0 else 0
+    annualized_return = ((adjusted_revenue / total_cost) ** (1 / timeline_years) - 1) if total_cost > 0 else 0
+    breakeven_psf = total_cost / build_sf if build_sf > 0 else 0
+
+    # ══════════════════════════════════════════════
+    # STEP 3: Risk scoring (0-100, higher = more risk)
+    # ══════════════════════════════════════════════
+    risk_score = 0
+    risk_flags = []
+
+    active_permits = [p for p in result.street_permits if p.status == 'Active']
+
+    # Market data risks
+    if median_psf > 0:
+        exit_gap = ((exit_psf - median_psf) / median_psf) * 100
+        if exit_gap > 20:
+            risk_score += 30
+            risk_flags.append(("🔴", f"Exit ${exit_psf}/sf is **{exit_gap:.0f}% above** market median ${median_psf}/sf — UNREALISTIC"))
+        elif exit_gap > 10:
+            risk_score += 15
+            risk_flags.append(("🟡", f"Exit ${exit_psf}/sf is **{exit_gap:.0f}% above** market median ${median_psf}/sf — AGGRESSIVE"))
+        elif exit_gap > 0:
+            risk_score += 5
+            risk_flags.append(("🟢", f"Exit ${exit_psf}/sf is **{exit_gap:.0f}% above** market median ${median_psf}/sf — Reasonable"))
+        else:
+            risk_flags.append(("🟢", f"Exit ${exit_psf}/sf is **at or below** market median ${median_psf}/sf — Conservative"))
+    else:
+        risk_score += 20
+        risk_flags.append(("🟡", "No market comp data — cannot validate exit assumptions"))
+
+    # Competition risks
+    if len(active_permits) >= 5:
+        risk_score += 20
+        risk_flags.append(("🔴", f"**{len(active_permits)} competing units** under active construction on {street_name} St"))
+    elif len(active_permits) >= 3:
+        risk_score += 10
+        risk_flags.append(("🟡", f"{len(active_permits)} competing units under construction on {street_name} St"))
+    elif len(active_permits) > 0:
+        risk_flags.append(("🟢", f"{len(active_permits)} unit(s) under construction — manageable competition"))
+
+    # Profitability risks
+    if market_profit < 0:
+        risk_score += 25
+        risk_flags.append(("🔴", f"**Negative profit** at market exit (${adjusted_exit:.0f}/sf) — LOSS of ${abs(market_profit):,.0f}"))
+    elif market_profit < 100000:
+        risk_score += 15
+        risk_flags.append(("🟡", f"Thin profit margin (${market_profit:,.0f}) — vulnerable to overruns"))
+
+    if delay_months > 3:
+        risk_score += 10
+        risk_flags.append(("🟡", f"Delays adding ${delay_cost:,.0f} in holding costs"))
+
+    if breakeven_psf > median_psf and median_psf > 0:
+        risk_score += 20
+        risk_flags.append(("🔴", f"Break-even (${breakeven_psf:.0f}/sf) is **above** market median (${median_psf}/sf)"))
+
+    # ══════════════════════════════════════════════
+    # STEP 4: THE VERDICT
+    # ══════════════════════════════════════════════
+    st.markdown("---")
+
+    if risk_score >= 50 or market_profit < 0:
+        verdict = "DON'T BUY"
+        verdict_color = "red"
+        verdict_emoji = "❌"
+        verdict_detail = "Too many risk factors. This deal doesn't pencil at current market rates."
+    elif risk_score >= 25 or market_profit < 100000:
+        verdict = "CAUTION"
+        verdict_color = "orange"
+        verdict_emoji = "⚠️"
+        verdict_detail = "Deal is marginal. Only proceed if you can negotiate better terms."
+    else:
+        verdict = "BUY"
+        verdict_color = "green"
+        verdict_emoji = "✅"
+        verdict_detail = "Deal looks solid based on market data and financials."
+
+    # Big verdict banner
+    st.markdown(f"""
+    <div style="background-color: {'#ff4b4b' if verdict == "DON'T BUY" else '#ffa726' if verdict == 'CAUTION' else '#4caf50'};
+                padding: 30px; border-radius: 15px; text-align: center; margin: 10px 0 20px 0;">
+        <h1 style="color: white; margin: 0; font-size: 48px;">{verdict_emoji} {verdict}</h1>
+        <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">{verdict_detail}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Key numbers
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("All-In Cost", f"${total_cost:,.0f}")
+    c2.metric("Market Exit Revenue", f"${adjusted_revenue:,.0f}")
+    c3.metric("Profit (Market)", f"${market_profit:,.0f}")
+    c4.metric("Break-Even", f"${breakeven_psf:.0f}/sf")
+    c5.metric("Risk Score", f"{risk_score}/100")
+
+    if median_psf > 0:
+        st.info(f"📊 **Real Market Data:** Redfin median for new construction in {zip_code} is **${median_psf}/sf** "
+                f"({result.market_stats.get('count', 0)} sold comps). Your exit assumption is ${exit_psf}/sf.")
+
+    st.markdown("---")
+
+    # ══════════════════════════════════════════════
+    # TABS
+    # ══════════════════════════════════════════════
+    tab_verdict, tab_scenarios, tab_comps, tab_permits, tab_download = st.tabs([
+        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏗️ Permits", "📄 Download"
     ])
+
+    # ── Risk Analysis Tab ──
+    with tab_verdict:
+        st.subheader("Risk Factors")
+        for emoji, msg in risk_flags:
+            st.markdown(f"{emoji} {msg}")
+
+        st.markdown("---")
+        st.subheader("Deal Structure")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Costs**")
+            st.markdown(f"""
+            | Item | Amount |
+            |------|--------|
+            | Purchase Price | ${purchase_price:,.0f} |
+            | Build Cost ({build_sf:,} sf × ${build_cost_psf}/sf) | ${total_build_cost:,.0f} |
+            | Contingency (8%) | ${total_build_cost * 0.08:,.0f} |
+            | Interest ({interest_rate}% × {timeline_years} yr) | ${interest_cost:,.0f} |
+            | Delay Cost ({delay_months} mo) | ${delay_cost:,.0f} |
+            | **Total All-In** | **${total_cost:,.0f}** |
+            """)
+
+        with c2:
+            st.markdown("**Returns**")
+            st.markdown(f"""
+            | Scenario | Revenue | Profit |
+            |----------|---------|--------|
+            | Your Exit (${exit_psf}/sf) | ${user_revenue:,.0f} | ${user_profit:,.0f} |
+            | Market Exit (${adjusted_exit:.0f}/sf) | ${adjusted_revenue:,.0f} | ${market_profit:,.0f} |
+            | Break-Even | ${total_cost:,.0f} | $0 |
+            """)
+
+        st.markdown("---")
+        st.subheader("Hold Strategy (Rental)")
+        rc1, rc2, rc3 = st.columns(3)
+        rc1.metric("Annual Rent", f"${annual_rent:,.0f}")
+        rc2.metric("Cash-on-Cash Yield", f"{cash_yield:.1f}%")
+        rc3.metric("Equity Invested", f"${equity:,.0f}")
+
+        if cash_yield > 8:
+            st.success(f"✅ Rental yield ({cash_yield:.1f}%) is strong — hold strategy viable")
+        elif cash_yield > 5:
+            st.warning(f"⚠️ Rental yield ({cash_yield:.1f}%) is thin — hold strategy marginal")
+        else:
+            st.error(f"❌ Rental yield ({cash_yield:.1f}%) is weak — hold strategy not recommended")
+
+        st.caption("⚠ TCAD data (appraisals, deeds, foreclosure checks) requires running the CLI tool locally for complete risk assessment.")
+
+    # ── Scenarios & Sensitivity Tab ──
+    with tab_scenarios:
+        st.subheader("Exit Scenario Matrix")
+        # Build scenario table
+        test_psfs = sorted(set([
+            int(breakeven_psf) if breakeven_psf > 0 else 300,
+            median_psf - 25 if median_psf > 0 else 325,
+            median_psf if median_psf > 0 else 350,
+            median_psf + 25 if median_psf > 0 else 375,
+            median_psf + 50 if median_psf > 0 else 400,
+            exit_psf,
+        ]))
+        test_psfs = [p for p in test_psfs if p > 0]
+
+        scenario_data = []
+        for psf in test_psfs:
+            revenue = psf * build_sf
+            profit = revenue - total_cost
+            margin = (profit / total_cost) * 100 if total_cost > 0 else 0
+            label = ""
+            if median_psf > 0 and psf == median_psf:
+                label = "← MARKET MEDIAN"
+            elif psf == exit_psf:
+                label = "← YOUR EXIT"
+            elif psf == int(breakeven_psf):
+                label = "← BREAK-EVEN"
+            scenario_data.append({
+                "Exit $/sf": f"${psf}",
+                "Revenue": f"${revenue:,.0f}",
+                "Profit": f"${profit:,.0f}",
+                "Margin": f"{margin:.1f}%",
+                "Signal": "✅" if margin > 10 else ("⚠" if margin > 0 else "❌"),
+                "Note": label,
+            })
+        st.dataframe(scenario_data, use_container_width=True, hide_index=True)
+
+        # Sensitivity charts
+        st.subheader("📈 Sensitivity — Purchase Price vs Profit")
+        price_range = np.arange(max(200000, purchase_price - 200000),
+                                purchase_price + 200000, 25000)
+        profits_by_price = []
+        for p in price_range:
+            cost = p + total_build_cost + interest_cost + delay_cost + (total_build_cost * 0.08)
+            profits_by_price.append(adjusted_revenue - cost)
+        st.line_chart({"Purchase Price": price_range, "Profit": profits_by_price},
+                      x="Purchase Price", y="Profit")
+
+        st.subheader("📊 Sensitivity — Exit $/sf vs Profit")
+        exit_range = np.arange(250, 500, 10)
+        profits_by_exit = []
+        for e in exit_range:
+            rev = e * build_sf
+            profits_by_exit.append(rev - total_cost)
+        st.line_chart({"Exit $/sf": exit_range, "Profit": profits_by_exit},
+                      x="Exit $/sf", y="Profit")
+
+        if median_psf > 0:
+            st.info(f"📍 Market median is **${median_psf}/sf** — your break-even is **${breakeven_psf:.0f}/sf**. "
+                    f"You need the market to be **${breakeven_psf - median_psf:+.0f}/sf above median** to break even.")
 
     # ── Comps Tab ──
     with tab_comps:
@@ -461,7 +703,7 @@ if submitted and address and zip_code:
                     comp_data.append({
                         "Address": c["address"],
                         "Price": f"${c['price']:,}",
-                        "Size (sf)": f"{c['sqft']:,}",
+                        "Size": f"{c['sqft']:,} sf",
                         "$/sf": c["psf"],
                         "Built": c.get("year_built", ""),
                         "Sold": c.get("sold_date", ""),
@@ -469,15 +711,6 @@ if submitted and address and zip_code:
                         "Baths": c.get("baths", ""),
                     })
             st.dataframe(comp_data, use_container_width=True, hide_index=True)
-
-            if exit_psf and median:
-                gap = ((exit_psf - median) / median) * 100
-                if gap > 15:
-                    st.error(f"🔴 Exit ${exit_psf}/sf is **{gap:.0f}% above** market median (${median}/sf) — AGGRESSIVE")
-                elif gap > 5:
-                    st.warning(f"🟡 Exit ${exit_psf}/sf is **{gap:.0f}% above** market median (${median}/sf) — Caution")
-                else:
-                    st.success(f"🟢 Exit ${exit_psf}/sf is within **{gap:.0f}%** of market median (${median}/sf) — Reasonable")
         else:
             st.warning("No Redfin comps available. Redfin may be blocking requests from this server.")
 
@@ -490,20 +723,19 @@ if submitted and address and zip_code:
 
             if active:
                 st.markdown(f"### 🟡 Under Construction ({len(active)})")
-                active_data = [{"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
-                               "Builder": p.builder, "Permit Date": p.issue_date,
-                               "Type": p.permit_class} for p in active]
-                st.dataframe(active_data, use_container_width=True, hide_index=True)
-
+                st.dataframe([{"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
+                              "Builder": p.builder, "Date": p.issue_date,
+                              "Type": p.permit_class} for p in active],
+                             use_container_width=True, hide_index=True)
             if final:
                 st.markdown(f"### ✅ Completed ({len(final)})")
-                final_data = [{"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
-                              "Builder": p.builder, "Permit Date": p.issue_date,
-                              "Type": p.permit_class} for p in final]
-                st.dataframe(final_data, use_container_width=True, hide_index=True)
+                st.dataframe([{"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
+                              "Builder": p.builder, "Date": p.issue_date,
+                              "Type": p.permit_class} for p in final],
+                             use_container_width=True, hide_index=True)
 
-            # Summary by year
-            st.markdown(f"### 📊 Zip Code {zip_code} — Permit Trend")
+            # Zip summary
+            st.markdown(f"### 📊 Zip {zip_code} — Permit Trend")
             by_year = {}
             for p in result.zip_permits:
                 yr = p.issue_date[:4] if p.issue_date else 'Unknown'
@@ -517,64 +749,7 @@ if submitted and address and zip_code:
                                   "Avg SF": f"{total_sf / len(permits):,.0f}" if permits else "0"})
             st.dataframe(year_data, use_container_width=True, hide_index=True)
         else:
-            st.info("No new construction permits found for this street.")
-
-    # ── Analysis Tab ──
-    with tab_analysis:
-        if purchase_price > 0 and build_sf > 0:
-            total_build_cost = build_cost_psf * build_sf
-            total_cost = purchase_price + total_build_cost + (total_build_cost * 0.10)
-            median = result.market_stats.get("median_psf", 0)
-
-            st.subheader("Deal Parameters")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Purchase", f"${purchase_price:,.0f}")
-            c2.metric("Build Cost", f"${total_build_cost:,.0f}", delta=f"${build_cost_psf}/sf")
-            c3.metric("All-In Cost", f"${total_cost:,.0f}", delta="incl. 10% contingency")
-
-            st.subheader("Exit Scenarios")
-            test_psfs = set()
-            if median:
-                test_psfs.update([median, median + 25, median + 50])
-            if exit_psf:
-                test_psfs.add(exit_psf)
-
-            scenario_data = []
-            for psf in sorted(test_psfs):
-                if psf > 0:
-                    revenue = psf * build_sf
-                    profit = revenue - total_cost
-                    margin = (profit / total_cost) * 100
-                    scenario_data.append({
-                        "Exit $/sf": f"${psf}",
-                        "Revenue": f"${revenue:,.0f}",
-                        "Profit": f"${profit:,.0f}",
-                        "Margin": f"{margin:.1f}%",
-                        "Signal": "✅ GO" if margin > 10 else ("⚠ CAUTION" if margin > 0 else "❌ NO-GO"),
-                    })
-            st.dataframe(scenario_data, use_container_width=True, hide_index=True)
-
-            # Risk factors
-            st.subheader("Risk Assessment")
-            risks = []
-            active_permits = [p for p in result.street_permits if p.status == 'Active']
-            if active_permits:
-                risks.append(f"🟡 {len(active_permits)} competing units under construction on {street_name} St")
-            if exit_psf and median and ((exit_psf - median) / median) > 0.15:
-                risks.append(f"🔴 Exit $/sf ({exit_psf}) is >15% above market median (${median})")
-            if not result.redfin_comps:
-                risks.append("🟡 No Redfin comp data available — cannot validate exit assumptions")
-
-            st.info("⚠ TCAD data (appraisals, deeds, foreclosure checks) requires running the CLI tool locally. "
-                    "Risk assessment below is **partial** without TCAD.")
-
-            if risks:
-                for risk in risks:
-                    st.markdown(f"- {risk}")
-            else:
-                st.success("No red flags detected from available data sources.")
-        else:
-            st.info("Enter purchase price and build size in the sidebar to see deal analysis.")
+            st.info("No new construction permits found.")
 
     # ── Download Tab ──
     with tab_download:
@@ -592,31 +767,45 @@ if submitted and address and zip_code:
                 use_container_width=True,
                 type="primary",
             )
-            st.caption("Report includes permits, comps, and deal analysis.")
-            st.caption("For full report with TCAD data, run: `python analyze_deal.py`")
         else:
-            st.warning("No data to generate report. Run the analysis first.")
+            st.warning("No data to generate report.")
+
+        st.markdown("---")
+        st.subheader("📊 Key Insights")
+        st.markdown(f"""
+        - **Break-even exit:** ${breakeven_psf:.0f}/sf
+        - **Market median:** ${median_psf}/sf (Redfin, {result.market_stats.get('count', 0)} comps)
+        - **Your exit:** ${exit_psf}/sf {'✅' if exit_psf <= median_psf else '⚠️'}
+        - **This deal works IF:**
+          - Purchase price ≤ ${max(0, purchase_price - (exit_psf - median_psf) * build_sf):,.0f} (or lower)
+          - Exit ≥ ${breakeven_psf:.0f}/sf
+          - No major delays beyond {delay_months} months
+        """)
 
 elif submitted:
     st.error("Please enter both an address and ZIP code.")
 else:
     # Landing page
     st.markdown("""
-    ### How to Use
-    1. Enter a **property address** and **ZIP code** in the sidebar
-    2. Optionally add deal numbers (purchase price, build size, exit $/sf)
-    3. Click **🔍 Analyze Deal**
-    4. Review tabs: Comps → Permits → Analysis → Download
+    ### 🏡 How It Works
 
-    ### Data Sources
-    | Source | Data | Status |
-    |--------|------|--------|
-    | **Austin Open Data** | Construction permits (builder, size, status) | ✅ Available |
-    | **Redfin** | Recently sold new construction comps | ✅ Available |
-    | **TCAD** | Property appraisals, ownership, deeds | ⚠ CLI only |
+    1. **Enter property details** in the sidebar (address, ZIP, deal numbers)
+    2. **Click "Analyze"** — the app pulls real market data automatically
+    3. **Get a clear BUY / CAUTION / DON'T BUY verdict**
 
-    > **Note:** For full analysis including TCAD property records, foreclosure checks,
-    > and deed history, run the CLI tool locally:
+    ### What Makes This Different
+
+    | Feature | Generic Calculator | This App |
+    |---------|-------------------|----------|
+    | Market comps | ❌ You guess | ✅ Pulls from Redfin |
+    | Permit data | ❌ None | ✅ Austin permits API |
+    | Competition check | ❌ None | ✅ Same-street construction |
+    | Risk scoring | ❌ None | ✅ Automated 0-100 score |
+    | BUY/DON'T BUY | ❌ None | ✅ Clear recommendation |
+    | Sensitivity analysis | ✅ Manual | ✅ Auto with real median |
+
+    > **Pro tip:** For complete analysis including TCAD records, deed history,
+    > and foreclosure detection, run the CLI tool locally:
     > ```
     > python analyze_deal.py "ADDRESS" --zip XXXXX --purchase-price N
     > ```
