@@ -555,9 +555,16 @@ def geocode_address(address: str, zip_code: str):
 
 
 @st.cache_data(ttl=3600)
-def fetch_plot_info(lat: float, lon: float):
+def fetch_plot_info(lat: float, lon: float, address: str = ""):
     """Fetch zoning, parcel, and flood data from Austin ArcGIS."""
     plot_data = {}
+    buf = 0.0003  # ~30 meters buffer for envelope queries
+
+    # Extract address number for parcel matching
+    addr_num = ""
+    parts = address.split()
+    if parts and parts[0].isdigit():
+        addr_num = parts[0]
 
     # Zoning (use envelope/buffer since point can miss on parcel boundaries)
     try:
@@ -582,19 +589,27 @@ def fetch_plot_info(lat: float, lon: float):
     except Exception:
         pass
 
-    # TCAD Parcel
+    # TCAD Parcel (use envelope since point can miss on boundaries)
     try:
         url = f'{ARCGIS_BASE}/EXTERNAL_tcad_parcel/FeatureServer/0/query'
         params = {
-            'geometry': f'{lon},{lat}',
-            'geometryType': 'esriGeometryPoint',
+            'geometry': f'{lon-buf},{lat-buf},{lon+buf},{lat+buf}',
+            'geometryType': 'esriGeometryEnvelope',
             'spatialRel': 'esriSpatialRelIntersects',
             'inSR': '4326', 'outFields': '*', 'f': 'json', 'returnGeometry': 'false',
         }
         r = requests.get(url, params=params, timeout=15)
         features = r.json().get('features', [])
         if features:
-            attrs = features[0]['attributes']
+            # Match by address number if multiple parcels returned
+            best = features[0]
+            if addr_num and len(features) > 1:
+                for f in features:
+                    situs = str(f['attributes'].get('SITUS', ''))
+                    if situs == addr_num:
+                        best = f
+                        break
+            attrs = best['attributes']
             plot_data['parcel'] = {
                 'prop_id': attrs.get('PROP_ID', ''),
                 'pid': attrs.get('PID_10', ''),
@@ -606,12 +621,12 @@ def fetch_plot_info(lat: float, lon: float):
     except Exception:
         pass
 
-    # FEMA Flood
+    # FEMA Flood (use envelope)
     try:
         url = f'{ARCGIS_BASE}/INLANDWATERS_greater_austin_fema_floodplain/FeatureServer/0/query'
         params = {
-            'geometry': f'{lon},{lat}',
-            'geometryType': 'esriGeometryPoint',
+            'geometry': f'{lon-buf},{lat-buf},{lon+buf},{lat+buf}',
+            'geometryType': 'esriGeometryEnvelope',
             'spatialRel': 'esriSpatialRelIntersects',
             'inSR': '4326', 'outFields': '*', 'f': 'json', 'returnGeometry': 'false',
         }
@@ -1132,11 +1147,11 @@ if submitted and address and zip_code:
 
         # Property links
         addr_slug = address.replace(' ', '-').replace(',', '')
-        addr_encoded = address.replace(' ', '+')
+        addr_query = address.replace(' ', '+')
         zillow_search = f"https://www.zillow.com/homes/{addr_slug}-Austin-TX-{zip_code}_rb/"
-        redfin_search = f"https://www.redfin.com/city/30818/TX/Austin/filter/keyword={addr_encoded}"
+        redfin_search = f"https://www.redfin.com/search#q={addr_query}%20Austin%20TX%20{zip_code}"
         tcad_search = f"https://stage.travis.prodigycad.com/property-search"
-        google_maps = f"https://www.google.com/maps/search/{addr_encoded}+Austin+TX+{zip_code}"
+        google_maps = f"https://www.google.com/maps/search/{addr_query}+Austin+TX+{zip_code}"
 
         lc1, lc2, lc3, lc4 = st.columns(4)
         lc1.markdown(f"[🔗 Zillow]({zillow_search})")
@@ -1151,7 +1166,7 @@ if submitted and address and zip_code:
             lat, lon = geocode_address(address, zip_code)
 
         if lat and lon:
-            plot_data = fetch_plot_info(lat, lon)
+            plot_data = fetch_plot_info(lat, lon, address)
             st.caption(f"📍 Coordinates: {lat:.6f}, {lon:.6f}")
 
             pc1, pc2 = st.columns(2)
