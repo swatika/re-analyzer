@@ -1149,7 +1149,7 @@ if submitted and address and zip_code:
         addr_slug = address.replace(' ', '-').replace(',', '')
         addr_query = address.replace(' ', '+')
         zillow_search = f"https://www.zillow.com/homes/{addr_slug}-Austin-TX-{zip_code}_rb/"
-        redfin_search = f"https://www.redfin.com/search#q={addr_query}%20Austin%20TX%20{zip_code}"
+        redfin_search = f"https://www.google.com/search?q=site:redfin.com+{addr_query}+Austin+TX+{zip_code}"
         tcad_search = f"https://stage.travis.prodigycad.com/property-search"
         google_maps = f"https://www.google.com/maps/search/{addr_query}+Austin+TX+{zip_code}"
 
