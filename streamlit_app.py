@@ -409,18 +409,117 @@ ARCGIS_BASE = "https://services.arcgis.com/0L95CJ0VTaxqcmED/ArcGIS/rest/services
 
 # Austin zoning density rules (approximate max units per lot)
 ZONING_INFO = {
-    "SF-1": {"desc": "Single Family Residence - Large Lot", "max_units": 1, "min_lot_sf": 10000},
-    "SF-2": {"desc": "Single Family Residence - Standard Lot", "max_units": 1, "min_lot_sf": 5750},
-    "SF-3": {"desc": "Single Family Residence - Standard Lot", "max_units": 1, "min_lot_sf": 5750},
-    "SF-4A": {"desc": "Single Family - Small Lot", "max_units": 1, "min_lot_sf": 3500},
-    "SF-5": {"desc": "Single Family - Urban", "max_units": 1, "min_lot_sf": 2500},
-    "SF-6": {"desc": "Townhouse/Condo", "max_units": 8, "min_lot_sf": 2500},
-    "MF-1": {"desc": "Multifamily - Low Density", "max_units": "18/acre", "min_lot_sf": 8000},
-    "MF-2": {"desc": "Multifamily - Low-Medium Density", "max_units": "25/acre", "min_lot_sf": 8000},
-    "MF-3": {"desc": "Multifamily - Medium Density", "max_units": "36/acre", "min_lot_sf": 8000},
-    "MF-4": {"desc": "Multifamily - Moderate-High Density", "max_units": "54/acre", "min_lot_sf": 8000},
-    "MF-5": {"desc": "Multifamily - High Density", "max_units": "No max", "min_lot_sf": 8000},
-    "MF-6": {"desc": "Multifamily - Highest Density", "max_units": "No max", "min_lot_sf": 10000},
+    "SF-1": {
+        "desc": "Single Family Residence - Large Lot",
+        "max_units": 1, "min_lot_sf": 10000,
+        "plain": "Only one house allowed. Large lot (¼ acre+). Think suburban estate feel.",
+        "can_build": "1 single-family home + 1 ADU (accessory dwelling unit, like a garage apartment)",
+        "height": "35 ft (2-3 stories)",
+    },
+    "SF-2": {
+        "desc": "Single Family Residence - Standard Lot",
+        "max_units": 1, "min_lot_sf": 5750,
+        "plain": "Typical Austin residential neighborhood. One house per lot, standard-sized yard.",
+        "can_build": "1 single-family home + 1 ADU. Duplex NOT allowed unless you get a zoning change.",
+        "height": "35 ft (2-3 stories)",
+    },
+    "SF-3": {
+        "desc": "Single Family Residence - Standard Lot (more flexible)",
+        "max_units": 1, "min_lot_sf": 5750,
+        "plain": "Same as SF-2 but slightly more flexible. Most common residential zoning in Austin.",
+        "can_build": "1 single-family home + 1 ADU. Duplexes allowed on corner lots in some cases.",
+        "height": "35 ft (2-3 stories)",
+    },
+    "SF-4A": {
+        "desc": "Single Family - Small Lot",
+        "max_units": 1, "min_lot_sf": 3500,
+        "plain": "Smaller lots, urban infill. Great for compact new construction.",
+        "can_build": "1 single-family home + 1 ADU on a smaller lot",
+        "height": "35 ft (2-3 stories)",
+    },
+    "SF-5": {
+        "desc": "Single Family - Urban",
+        "max_units": 1, "min_lot_sf": 2500,
+        "plain": "Very small urban lots. Townhome-style development possible.",
+        "can_build": "1 single-family home or townhome + 1 ADU",
+        "height": "35 ft (2-3 stories)",
+    },
+    "SF-6": {
+        "desc": "Townhouse / Condo",
+        "max_units": 8, "min_lot_sf": 2500,
+        "plain": "Allows multiple attached units (townhomes, condos). Good for small-scale development.",
+        "can_build": "Up to 8 townhome/condo units depending on lot size",
+        "height": "35 ft (2-3 stories)",
+    },
+    "MF-1": {
+        "desc": "Multifamily - Low Density",
+        "max_units": "18/acre", "min_lot_sf": 8000,
+        "plain": "Small apartment buildings, duplexes, fourplexes. Residential feel but multiple units.",
+        "can_build": "~18 units per acre. On a 7,000 sf lot ≈ 2-3 units.",
+        "height": "40 ft (3 stories)",
+    },
+    "MF-2": {
+        "desc": "Multifamily - Low-Medium Density",
+        "max_units": "25/acre", "min_lot_sf": 8000,
+        "plain": "Medium apartment buildings. Common along transit corridors.",
+        "can_build": "~25 units per acre. On a 7,000 sf lot ≈ 4 units.",
+        "height": "40 ft (3 stories)",
+    },
+    "MF-3": {
+        "desc": "Multifamily - Medium Density",
+        "max_units": "36/acre", "min_lot_sf": 8000,
+        "plain": "Larger apartment complexes. Urban mixed-use areas.",
+        "can_build": "~36 units per acre.",
+        "height": "40 ft (3 stories)",
+    },
+    "MF-4": {
+        "desc": "Multifamily - Moderate-High Density",
+        "max_units": "54/acre", "min_lot_sf": 8000,
+        "plain": "Dense apartment buildings. Downtown-adjacent areas.",
+        "can_build": "~54 units per acre.",
+        "height": "60 ft (5 stories)",
+    },
+    "MF-5": {
+        "desc": "Multifamily - High Density",
+        "max_units": "No max", "min_lot_sf": 8000,
+        "plain": "High-rise apartments. No unit cap — limited by building size/FAR.",
+        "can_build": "No unit maximum. Limited by floor-area ratio and height.",
+        "height": "60 ft (5 stories)",
+    },
+    "MF-6": {
+        "desc": "Multifamily - Highest Density",
+        "max_units": "No max", "min_lot_sf": 10000,
+        "plain": "Tallest residential buildings. Downtown high-rises.",
+        "can_build": "No unit maximum. Tallest allowed residential.",
+        "height": "No limit",
+    },
+}
+
+# Plain-English overlay explanations
+OVERLAY_EXPLANATIONS = {
+    "-NP": (
+        "🏘️ **Neighborhood Plan (NP)**",
+        "This property is in a Neighborhood Plan area. The neighborhood has agreed to extra rules about "
+        "what can be built — things like building height, setbacks, parking, and design standards. "
+        "You may need to attend a neighborhood meeting before getting permits. "
+        "Check the specific plan at [Austin Neighborhood Plans](https://www.austintexas.gov/department/neighborhood-plans)."
+    ),
+    "-CO": (
+        "📋 **Conditional Overlay (CO)**",
+        "This lot has special conditions attached by the City. These are specific rules that override "
+        "the base zoning — for example, limiting hours of operation, requiring extra landscaping, or "
+        "restricting certain uses. You MUST check the specific conditions with the City of Austin."
+    ),
+    "-H": (
+        "🏛️ **Historic (H)**",
+        "This property is in a historic district. Renovations and new construction must follow strict "
+        "design guidelines to preserve neighborhood character. Demolition may be restricted or prohibited."
+    ),
+    "-V": (
+        "🌿 **Vertical Mixed Use (V/VMU)**",
+        "Allows ground-floor commercial with residential above. Great for mixed-use development. "
+        "May get density bonuses if affordable housing is included."
+    ),
 }
 
 
@@ -1033,10 +1132,11 @@ if submitted and address and zip_code:
 
         # Property links
         addr_slug = address.replace(' ', '-').replace(',', '')
+        addr_encoded = address.replace(' ', '+')
         zillow_search = f"https://www.zillow.com/homes/{addr_slug}-Austin-TX-{zip_code}_rb/"
-        redfin_search = f"https://www.google.com/search?q=redfin+{address.replace(' ', '+')}+Austin+TX+{zip_code}&btnI"
+        redfin_search = f"https://www.redfin.com/city/30818/TX/Austin/filter/keyword={addr_encoded}"
         tcad_search = f"https://stage.travis.prodigycad.com/property-search"
-        google_maps = f"https://www.google.com/maps/search/{address.replace(' ', '+')}+Austin+TX+{zip_code}"
+        google_maps = f"https://www.google.com/maps/search/{addr_encoded}+Austin+TX+{zip_code}"
 
         lc1, lc2, lc3, lc4 = st.columns(4)
         lc1.markdown(f"[🔗 Zillow]({zillow_search})")
@@ -1067,31 +1167,40 @@ if submitted and address and zip_code:
                     zoning_area = zoning.get('lot_area_sf', 0)
 
                     st.metric("Zoning Type", ztype)
-                    st.write(f"**Full Name:** {name}")
 
-                    # Density / unit info from lookup
+                    # Plain-English explanation
                     info = ZONING_INFO.get(base, {})
                     if info:
-                        max_u = info.get('max_units', 'Unknown')
-                        min_lot = info.get('min_lot_sf', 0)
-                        st.write(f"**Max Units (by code):** {max_u}")
-                        st.write(f"**Min Lot Size:** {min_lot:,} sf")
-                        if zoning_area > 0 and isinstance(max_u, str) and '/acre' in str(max_u):
-                            density = int(max_u.replace('/acre', ''))
+                        st.info(f"💡 **What this means:** {info.get('plain', '')}")
+
+                        st.markdown(f"""
+                        | | Detail |
+                        |---|---|
+                        | **Official Name** | {name} |
+                        | **What you can build** | {info.get('can_build', 'Check with city')} |
+                        | **Max height** | {info.get('height', 'Check with city')} |
+                        | **Max units allowed** | {info.get('max_units', 'Unknown')} |
+                        | **Min lot size required** | {info.get('min_lot_sf', 0):,} sf |
+                        | **This lot size** | {zoning_area:,} sf ({zoning_area/43560:.2f} acres) |
+                        """)
+
+                        if zoning_area > 0 and isinstance(info.get('max_units'), str) and '/acre' in str(info['max_units']):
+                            density = int(info['max_units'].replace('/acre', ''))
                             acres = zoning_area / 43560
                             est_units = int(acres * density)
-                            st.write(f"**Est. Max Units (this lot):** ~{est_units} ({acres:.2f} acres × {density}/acre)")
-                        st.write(f"**Zoning Lot Area:** {zoning_area:,} sf ({zoning_area/43560:.2f} acres)")
+                            st.success(f"📐 **Estimated max units on this lot:** ~{est_units} ({acres:.2f} acres × {density}/acre)")
                     else:
+                        st.write(f"**Full Name:** {name}")
                         st.write(f"**Base Zone:** {base}")
                         if zoning_area > 0:
-                            st.write(f"**Zoning Lot Area:** {zoning_area:,} sf")
+                            st.write(f"**Lot Area:** {zoning_area:,} sf ({zoning_area/43560:.2f} acres)")
 
-                    # Overlays in zoning type
-                    if '-NP' in ztype:
-                        st.warning("⚠️ **Neighborhood Plan (NP)** overlay — additional design/use restrictions may apply")
-                    if '-CO' in ztype:
-                        st.warning("⚠️ **Conditional Overlay (CO)** — check conditions with City of Austin")
+                    # Overlay explanations
+                    for suffix, (title, explanation) in OVERLAY_EXPLANATIONS.items():
+                        if suffix in ztype:
+                            st.markdown("---")
+                            st.markdown(f"#### {title}")
+                            st.write(explanation)
                 else:
                     st.warning("Zoning data not available for this location")
 
@@ -1115,17 +1224,27 @@ if submitted and address and zip_code:
                 flood = plot_data.get('flood', {})
                 if flood.get('in_floodplain'):
                     st.error(f"❌ **IN FLOOD ZONE:** {flood.get('zone', 'Unknown')}")
-                    st.write("Flood insurance required. Check with FEMA for exact determination.")
+                    st.write("**What this means:** Your property is in a flood-risk area. "
+                             "You'll be **required to buy flood insurance** (can be $1,000–$5,000+/year). "
+                             "Construction costs may be higher (elevated foundation). "
+                             "Resale can be harder — many buyers avoid flood zones.")
                 else:
                     st.success(f"✅ **Not in floodplain** — Zone: {flood.get('zone', 'X')}")
+                    st.write("**What this means:** Low flood risk. No mandatory flood insurance required. "
+                             "This is the best-case scenario for lenders and insurance costs.")
 
-                st.markdown("### 🛣️ Legal Access")
-                st.write("Check plat map for legal road access and easements.")
-                st.markdown(f"[View Austin GIS Map](https://www.austintexas.gov/gis/)")
+                st.markdown("### 🛣️ Legal Access to Road")
+                st.info("**What this means:** Every buildable lot needs legal access to a public road. "
+                        "If the lot is landlocked (no road frontage), you can't get a building permit. "
+                        "Check the **plat map** to confirm the lot touches a public street or has a recorded easement.")
+                st.markdown(f"[🗺️ View Austin GIS Map](https://www.austintexas.gov/gis/) · "
+                           f"[📄 Travis County Plat Records](https://www.traviscountyclerk.org/)")
 
-                st.markdown("### 📜 Title")
-                st.write("Run title search through county clerk for liens, encumbrances.")
-                st.markdown("[Travis County Records](https://deed.traviscountyclerk.org/)")
+                st.markdown("### 📜 Title & Liens")
+                st.info("**What this means:** Before buying, a title search checks if anyone else "
+                        "has a legal claim on the property — unpaid taxes, mortgages, contractor liens, "
+                        "or easements. Your title company does this at closing, but you can check early.")
+                st.markdown("[🔍 Travis County Deed Records](https://deed.traviscountyclerk.org/)")
 
         else:
             st.error("Could not geocode address. Please verify the address and ZIP code.")
