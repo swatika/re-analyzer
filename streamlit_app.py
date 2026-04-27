@@ -36,7 +36,6 @@ class Permit:
     housing_units: int = 0
     floors: int = 0
     status: str = ""
-    permit_number: str = ""
 
 @dataclass
 class AnalysisResult:
@@ -98,7 +97,6 @@ class AustinPermits:
                 housing_units=int(r.get("housing_units", 0) or 0),
                 floors=int(r.get("number_of_floors", 0) or 0),
                 status=r.get("status_current", ""),
-                permit_number=r.get("permit_num", r.get("permitnumber", "")),
             ))
         return permits
 
@@ -168,28 +166,13 @@ class RedfinComps:
                     year = int(float(year_str)) if year_str else 0
                     psf = round(price / sqft) if sqft > 0 else 0
                     if price > 0 and year >= 2020:
-                        # Build Redfin URL from CSV or generate from address
-                        redfin_url = ''
-                        for key in row.keys():
-                            if key and 'URL' in key.upper():
-                                redfin_url = row[key] or ''
-                                break
-                        raw_addr = (row.get('ADDRESS') or '').strip()
-                        city = (row.get('CITY') or '').strip()
-                        state = (row.get('STATE OR PROVINCE') or 'TX').strip()
-                        zipcode = (row.get('ZIP OR POSTAL CODE') or '').strip()
-                        # Zillow search link from address
-                        zillow_query = f"{raw_addr} {city} {state} {zipcode}".replace(' ', '-')
-                        zillow_url = f"https://www.zillow.com/homes/{zillow_query}_rb/"
                         comps.append({
-                            'address': f"{raw_addr}, {city}",
+                            'address': f"{row.get('ADDRESS') or ''}, {row.get('CITY') or ''}",
                             'price': price, 'sqft': sqft, 'psf': psf,
                             'year_built': year,
                             'sold_date': row.get('SOLD DATE') or '',
                             'beds': row.get('BEDS') or '',
                             'baths': row.get('BATHS') or '',
-                            'redfin_url': redfin_url,
-                            'zillow_url': zillow_url,
                         })
                 except (ValueError, ZeroDivisionError):
                     continue
@@ -798,19 +781,8 @@ if submitted and address and zip_code:
                         "Sold": c.get("sold_date", ""),
                         "Beds": c.get("beds", ""),
                         "Baths": c.get("baths", ""),
-                        "Redfin": c.get("redfin_url", ""),
-                        "Zillow": c.get("zillow_url", ""),
                     })
-            df_comps = pd.DataFrame(comp_data)
-            st.dataframe(
-                df_comps,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Redfin": st.column_config.LinkColumn("Redfin", display_text="View"),
-                    "Zillow": st.column_config.LinkColumn("Zillow", display_text="View"),
-                },
-            )
+            st.dataframe(comp_data, use_container_width=True, hide_index=True)
         else:
             st.warning("No Redfin comps available. Redfin may be blocking requests from this server.")
 
@@ -823,24 +795,16 @@ if submitted and address and zip_code:
 
             if active:
                 st.markdown(f"### 🟡 Under Construction ({len(active)})")
-                permit_rows = []
-                for p in active:
-                    source_url = f"https://data.austintexas.gov/resource/3syk-w9eu.json?permit_num={p.permit_number}" if p.permit_number else ""
-                    permit_rows.append({"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
-                                        "Builder": p.builder, "Date": p.issue_date,
-                                        "Type": p.permit_class, "Source": source_url})
-                st.dataframe(pd.DataFrame(permit_rows), use_container_width=True, hide_index=True,
-                             column_config={"Source": st.column_config.LinkColumn("Source", display_text="Austin Open Data")})
+                st.dataframe([{"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
+                              "Builder": p.builder, "Date": p.issue_date,
+                              "Type": p.permit_class} for p in active],
+                             use_container_width=True, hide_index=True)
             if final:
                 st.markdown(f"### ✅ Completed ({len(final)})")
-                permit_rows = []
-                for p in final:
-                    source_url = f"https://data.austintexas.gov/resource/3syk-w9eu.json?permit_num={p.permit_number}" if p.permit_number else ""
-                    permit_rows.append({"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
-                                        "Builder": p.builder, "Date": p.issue_date,
-                                        "Type": p.permit_class, "Source": source_url})
-                st.dataframe(pd.DataFrame(permit_rows), use_container_width=True, hide_index=True,
-                             column_config={"Source": st.column_config.LinkColumn("Source", display_text="Austin Open Data")})
+                st.dataframe([{"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
+                              "Builder": p.builder, "Date": p.issue_date,
+                              "Type": p.permit_class} for p in final],
+                             use_container_width=True, hide_index=True)
 
             # Zip summary
             st.markdown(f"### 📊 Zip {zip_code} — Permit Trend")
