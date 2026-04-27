@@ -403,6 +403,130 @@ def extract_street_name(address: str) -> str:
     return " ".join(street_parts) if street_parts else (parts[1] if len(parts) > 1 else parts[0])
 
 
+# ── Plot Info Module ──
+
+ARCGIS_BASE = "https://services.arcgis.com/0L95CJ0VTaxqcmED/ArcGIS/rest/services"
+
+# Austin zoning density rules (approximate max units per lot)
+ZONING_INFO = {
+    "SF-1": {"desc": "Single Family Residence - Large Lot", "max_units": 1, "min_lot_sf": 10000},
+    "SF-2": {"desc": "Single Family Residence - Standard Lot", "max_units": 1, "min_lot_sf": 5750},
+    "SF-3": {"desc": "Single Family Residence - Standard Lot", "max_units": 1, "min_lot_sf": 5750},
+    "SF-4A": {"desc": "Single Family - Small Lot", "max_units": 1, "min_lot_sf": 3500},
+    "SF-5": {"desc": "Single Family - Urban", "max_units": 1, "min_lot_sf": 2500},
+    "SF-6": {"desc": "Townhouse/Condo", "max_units": 8, "min_lot_sf": 2500},
+    "MF-1": {"desc": "Multifamily - Low Density", "max_units": "18/acre", "min_lot_sf": 8000},
+    "MF-2": {"desc": "Multifamily - Low-Medium Density", "max_units": "25/acre", "min_lot_sf": 8000},
+    "MF-3": {"desc": "Multifamily - Medium Density", "max_units": "36/acre", "min_lot_sf": 8000},
+    "MF-4": {"desc": "Multifamily - Moderate-High Density", "max_units": "54/acre", "min_lot_sf": 8000},
+    "MF-5": {"desc": "Multifamily - High Density", "max_units": "No max", "min_lot_sf": 8000},
+    "MF-6": {"desc": "Multifamily - Highest Density", "max_units": "No max", "min_lot_sf": 10000},
+}
+
+
+@st.cache_data(ttl=3600)
+def geocode_address(address: str, zip_code: str):
+    """Geocode address using Census Bureau geocoder, fallback to Nominatim."""
+    # Try Census geocoder first
+    try:
+        params = {
+            'address': f'{address}, Austin, TX {zip_code}',
+            'benchmark': 'Public_AR_Current',
+            'format': 'json',
+        }
+        r = requests.get('https://geocoding.geo.census.gov/geocoder/locations/onelineaddress',
+                        params=params, timeout=15)
+        matches = r.json().get('result', {}).get('addressMatches', [])
+        if matches:
+            coords = matches[0]['coordinates']
+            return coords['y'], coords['x']
+    except Exception:
+        pass
+    # Fallback to Nominatim
+    try:
+        r = requests.get('https://nominatim.openstreetmap.org/search',
+                        params={'q': f'{address}, Austin, TX {zip_code}', 'format': 'json', 'limit': 1},
+                        headers={'User-Agent': 'RE-Analyzer/1.0'}, timeout=15)
+        data = r.json()
+        if data:
+            return float(data[0]['lat']), float(data[0]['lon'])
+    except Exception:
+        pass
+    return None, None
+
+
+@st.cache_data(ttl=3600)
+def fetch_plot_info(lat: float, lon: float):
+    """Fetch zoning, parcel, and flood data from Austin ArcGIS."""
+    plot_data = {}
+
+    # Zoning
+    try:
+        url = f'{ARCGIS_BASE}/Current_Zoning_gdb/FeatureServer/0/query'
+        params = {
+            'geometry': f'{lon},{lat}',
+            'geometryType': 'esriGeometryPoint',
+            'spatialRel': 'esriSpatialRelIntersects',
+            'inSR': '4326', 'outFields': '*', 'f': 'json', 'returnGeometry': 'false',
+        }
+        r = requests.get(url, params=params, timeout=15)
+        features = r.json().get('features', [])
+        if features:
+            attrs = features[0]['attributes']
+            plot_data['zoning'] = {
+                'zoning_type': attrs.get('ZONING_ZTYPE', ''),
+                'base_zone': attrs.get('BASE_ZONE', ''),
+                'zone_name': attrs.get('ZONE_NAME', ''),
+                'lot_area_sf': round(attrs.get('SHAPE__Area', 0)),
+            }
+    except Exception:
+        pass
+
+    # TCAD Parcel
+    try:
+        url = f'{ARCGIS_BASE}/EXTERNAL_tcad_parcel/FeatureServer/0/query'
+        params = {
+            'geometry': f'{lon},{lat}',
+            'geometryType': 'esriGeometryPoint',
+            'spatialRel': 'esriSpatialRelIntersects',
+            'inSR': '4326', 'outFields': '*', 'f': 'json', 'returnGeometry': 'false',
+        }
+        r = requests.get(url, params=params, timeout=15)
+        features = r.json().get('features', [])
+        if features:
+            attrs = features[0]['attributes']
+            plot_data['parcel'] = {
+                'prop_id': attrs.get('PROP_ID', ''),
+                'pid': attrs.get('PID_10', ''),
+                'situs': attrs.get('SITUS', ''),
+                'lot': attrs.get('LOTS', ''),
+                'block': attrs.get('BLOCKS', ''),
+                'parcel_area_sf': round(attrs.get('Shape__Area', 0)),
+            }
+    except Exception:
+        pass
+
+    # FEMA Flood
+    try:
+        url = f'{ARCGIS_BASE}/INLANDWATERS_greater_austin_fema_floodplain/FeatureServer/0/query'
+        params = {
+            'geometry': f'{lon},{lat}',
+            'geometryType': 'esriGeometryPoint',
+            'spatialRel': 'esriSpatialRelIntersects',
+            'inSR': '4326', 'outFields': '*', 'f': 'json', 'returnGeometry': 'false',
+        }
+        r = requests.get(url, params=params, timeout=15)
+        features = r.json().get('features', [])
+        plot_data['flood'] = {
+            'in_floodplain': len(features) > 0,
+            'zone': features[0]['attributes'].get('FLD_ZONE', '') if features else 'None (X - Minimal Risk)',
+        }
+    except Exception:
+        plot_data['flood'] = {'in_floodplain': False, 'zone': 'Unable to determine'}
+
+    return plot_data
+
+
 # ══════════════════════════════════════════════════════════════
 #  STREAMLIT UI — Combined Due Diligence + Financial Modeling
 # ══════════════════════════════════════════════════════════════
@@ -662,8 +786,8 @@ if submitted and address and zip_code:
     # ══════════════════════════════════════════════
     # TABS
     # ══════════════════════════════════════════════
-    tab_verdict, tab_scenarios, tab_comps, tab_permits, tab_download = st.tabs([
-        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏗️ Permits", "📄 Download"
+    tab_verdict, tab_scenarios, tab_comps, tab_permits, tab_plot, tab_download = st.tabs([
+        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏗️ Permits", "📋 Plot Info", "📄 Download"
     ])
 
     # ── Risk Analysis Tab ──
@@ -901,6 +1025,109 @@ if submitted and address and zip_code:
             st.dataframe(year_data, use_container_width=True, hide_index=True)
         else:
             st.info("No new construction permits found.")
+
+    # ── Plot Info Tab ──
+    with tab_plot:
+        st.subheader(f"📋 Plot Information — {address}")
+
+        # Property links
+        addr_slug = address.replace(' ', '-').replace(',', '')
+        zillow_search = f"https://www.zillow.com/homes/{addr_slug}-Austin-TX-{zip_code}_rb/"
+        redfin_search = f"https://www.redfin.com/TX/Austin/{addr_slug}-{zip_code}"
+        tcad_search = f"https://stage.travis.prodigycad.com/property-search"
+        google_maps = f"https://www.google.com/maps/search/{address.replace(' ', '+')}+Austin+TX+{zip_code}"
+
+        lc1, lc2, lc3, lc4 = st.columns(4)
+        lc1.markdown(f"[🔗 Zillow]({zillow_search})")
+        lc2.markdown(f"[🔗 Redfin]({redfin_search})")
+        lc3.markdown(f"[🔗 TCAD]({tcad_search})")
+        lc4.markdown(f"[🗺️ Google Maps]({google_maps})")
+
+        st.markdown("---")
+
+        # Geocode and fetch plot data
+        with st.spinner("Fetching zoning, parcel & flood data..."):
+            lat, lon = geocode_address(address, zip_code)
+
+        if lat and lon:
+            plot_data = fetch_plot_info(lat, lon)
+            st.caption(f"📍 Coordinates: {lat:.6f}, {lon:.6f}")
+
+            pc1, pc2 = st.columns(2)
+
+            # Zoning
+            with pc1:
+                st.markdown("### 🏗️ Zoning")
+                zoning = plot_data.get('zoning', {})
+                if zoning:
+                    ztype = zoning.get('zoning_type', 'Unknown')
+                    base = zoning.get('base_zone', '')
+                    name = zoning.get('zone_name', '')
+                    zoning_area = zoning.get('lot_area_sf', 0)
+
+                    st.metric("Zoning Type", ztype)
+                    st.write(f"**Full Name:** {name}")
+
+                    # Density / unit info from lookup
+                    info = ZONING_INFO.get(base, {})
+                    if info:
+                        max_u = info.get('max_units', 'Unknown')
+                        min_lot = info.get('min_lot_sf', 0)
+                        st.write(f"**Max Units (by code):** {max_u}")
+                        st.write(f"**Min Lot Size:** {min_lot:,} sf")
+                        if zoning_area > 0 and isinstance(max_u, str) and '/acre' in str(max_u):
+                            density = int(max_u.replace('/acre', ''))
+                            acres = zoning_area / 43560
+                            est_units = int(acres * density)
+                            st.write(f"**Est. Max Units (this lot):** ~{est_units} ({acres:.2f} acres × {density}/acre)")
+                        st.write(f"**Zoning Lot Area:** {zoning_area:,} sf ({zoning_area/43560:.2f} acres)")
+                    else:
+                        st.write(f"**Base Zone:** {base}")
+                        if zoning_area > 0:
+                            st.write(f"**Zoning Lot Area:** {zoning_area:,} sf")
+
+                    # Overlays in zoning type
+                    if '-NP' in ztype:
+                        st.warning("⚠️ **Neighborhood Plan (NP)** overlay — additional design/use restrictions may apply")
+                    if '-CO' in ztype:
+                        st.warning("⚠️ **Conditional Overlay (CO)** — check conditions with City of Austin")
+                else:
+                    st.warning("Zoning data not available for this location")
+
+            # Parcel & Flood
+            with pc2:
+                st.markdown("### 📐 Parcel")
+                parcel = plot_data.get('parcel', {})
+                if parcel:
+                    parcel_sf = parcel.get('parcel_area_sf', 0)
+                    st.write(f"**TCAD Property ID:** {parcel.get('prop_id', 'N/A')}")
+                    st.write(f"**Parcel ID:** {parcel.get('pid', 'N/A')}")
+                    st.write(f"**Lot:** {parcel.get('lot', 'N/A')}, **Block:** {parcel.get('block', 'N/A')}")
+                    if parcel_sf > 0:
+                        st.write(f"**Parcel Area:** {parcel_sf:,} sf ({parcel_sf/43560:.3f} acres)")
+                    tcad_link = f"https://stage.travis.prodigycad.com/property-detail/{parcel.get('prop_id', '')}/2026"
+                    st.markdown(f"[View on TCAD →]({tcad_link})")
+                else:
+                    st.warning("Parcel data not available")
+
+                st.markdown("### 🌊 FEMA Flood Zone")
+                flood = plot_data.get('flood', {})
+                if flood.get('in_floodplain'):
+                    st.error(f"❌ **IN FLOOD ZONE:** {flood.get('zone', 'Unknown')}")
+                    st.write("Flood insurance required. Check with FEMA for exact determination.")
+                else:
+                    st.success(f"✅ **Not in floodplain** — Zone: {flood.get('zone', 'X')}")
+
+                st.markdown("### 🛣️ Legal Access")
+                st.write("Check plat map for legal road access and easements.")
+                st.markdown(f"[View Austin GIS Map](https://www.austintexas.gov/gis/)")
+
+                st.markdown("### 📜 Title")
+                st.write("Run title search through county clerk for liens, encumbrances.")
+                st.markdown("[Travis County Records](https://deed.traviscountyclerk.org/)")
+
+        else:
+            st.error("Could not geocode address. Please verify the address and ZIP code.")
 
     # ── Download Tab ──
     with tab_download:
