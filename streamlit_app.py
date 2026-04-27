@@ -45,6 +45,7 @@ class AnalysisResult:
     redfin_comps: list = field(default_factory=list)
     market_stats: dict = field(default_factory=dict)
     sources_status: dict = field(default_factory=dict)
+    listing_status: dict = field(default_factory=dict)
 
 
 # ── Austin Permits Module ──
@@ -194,8 +195,51 @@ class RedfinComps:
         except Exception:
             return []
 
+    def check_listing_status(self, address: str, zip_code: str) -> dict:
+        """Check if property is active, pending, or sold on Redfin."""
+        region_id = self._get_region_id(zip_code)
+        if not region_id:
+            return {'status': 'Unknown', 'url': ''}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        }
+        # Extract street number + name for matching
+        addr_parts = address.upper().replace(',', '').split()
+        addr_num = addr_parts[0] if addr_parts else ''
+        addr_street = addr_parts[1] if len(addr_parts) > 1 else ''
 
-# ── Report Generator (in-memory) ──
+        # Check: 1=Active, 130=Pending/Under Contract, 9=Sold
+        for status_code, label in [(1, 'Active'), (130, 'Pending'), (9, 'Sold')]:
+            try:
+                url = (
+                    f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=100'
+                    f'&region_id={region_id}&region_type=2'
+                    f'&status={status_code}&uipt=1&v=8'
+                )
+                resp = requests.get(url, headers=headers, timeout=20)
+                if resp.status_code != 200:
+                    continue
+                lines = resp.text.strip().split('\n')
+                for i, line in enumerate(lines):
+                    if 'SALE TYPE' in line:
+                        reader = csv.DictReader(io.StringIO('\n'.join(lines[i:])))
+                        for row in reader:
+                            row_addr = (row.get('ADDRESS') or '').upper()
+                            if addr_num in row_addr and addr_street in row_addr:
+                                redfin_url = ''
+                                for key in row.keys():
+                                    if key and 'URL' in key.upper():
+                                        redfin_url = row[key] or ''
+                                        break
+                                return {
+                                    'status': label,
+                                    'price': row.get('PRICE', ''),
+                                    'url': redfin_url,
+                                }
+                        break
+            except Exception:
+                continue
+        return {'status': 'Not Found', 'url': ''}
 
 def generate_report_bytes(result: AnalysisResult, address: str, zip_code: str,
                           street_name: str, purchase_price: float,
@@ -392,6 +436,9 @@ def run_analysis(address: str, zip_code: str, street_name: str):
         result.sources_status['redfin'] = '✅'
     else:
         result.sources_status['redfin'] = '⚠ No data'
+
+    # Listing status (active/pending/sold)
+    result.listing_status = redfin_api.check_listing_status(address, zip_code)
 
     return result
 
@@ -870,9 +917,27 @@ if submitted and address and zip_code:
         verdict_emoji = "✅"
         verdict_detail = "Deal looks solid based on market data and financials."
 
+    # Check listing status — override verdict if not available
+    listing = result.listing_status
+    listing_status = listing.get('status', 'Unknown')
+    listing_url = listing.get('url', '')
+
+    if listing_status == 'Pending':
+        verdict_detail += " ⚠️ BUT this property is PENDING (under contract) — may not be available."
+        verdict_emoji = "🔒" if verdict == "BUY" else verdict_emoji
+        if verdict == "BUY":
+            verdict = "UNDER CONTRACT"
+            verdict_color = "orange"
+    elif listing_status == 'Sold':
+        verdict_detail += " 🏠 This property has already SOLD."
+        verdict_emoji = "🔒" if verdict == "BUY" else verdict_emoji
+        if verdict == "BUY":
+            verdict = "ALREADY SOLD"
+            verdict_color = "orange"
+
     # Big verdict banner
     st.markdown(f"""
-    <div style="background-color: {'#ff4b4b' if verdict == "DON'T BUY" else '#ffa726' if verdict == 'CAUTION' else '#4caf50'};
+    <div style="background-color: {'#ff4b4b' if verdict == "DON'T BUY" else '#ffa726' if verdict in ('CAUTION', 'UNDER CONTRACT', 'ALREADY SOLD') else '#4caf50'};
                 padding: 30px; border-radius: 15px; text-align: center; margin: 10px 0 20px 0;">
         <h1 style="color: white; margin: 0; font-size: 48px;">{verdict_emoji} {verdict}</h1>
         <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">{verdict_detail}</p>
@@ -1145,17 +1210,42 @@ if submitted and address and zip_code:
     with tab_plot:
         st.subheader(f"📋 Plot Information — {address}")
 
-        # Property links
+        # Listing status banner
+        listing = result.listing_status
+        listing_status = listing.get('status', 'Unknown')
+        listing_url = listing.get('url', '')
+        listing_price = listing.get('price', '')
+
+        if listing_status == 'Active':
+            st.success(f"🟢 **ACTIVE LISTING** — This property is for sale! "
+                       f"{'Listed at $' + f'{int(listing_price):,}' if listing_price else ''} "
+                       f"{'[View on Redfin →](' + listing_url + ')' if listing_url else ''}")
+        elif listing_status == 'Pending':
+            st.warning(f"🟡 **PENDING / UNDER CONTRACT** — Someone already has an offer accepted on this property. "
+                       f"{'Listed at $' + f'{int(listing_price):,}' if listing_price else ''} "
+                       f"You'd need to wait for it to fall through, or find a similar property. "
+                       f"{'[View on Redfin →](' + listing_url + ')' if listing_url else ''}")
+        elif listing_status == 'Sold':
+            st.error(f"🔴 **SOLD** — This property has already been sold. "
+                     f"{'Sale price: $' + f'{int(listing_price):,}' if listing_price else ''} "
+                     f"{'[View on Redfin →](' + listing_url + ')' if listing_url else ''}")
+        elif listing_status == 'Not Found':
+            st.info("⚪ **OFF-MARKET** — This property is not currently listed on Redfin. "
+                    "It may be a private sale, pocket listing, or not yet on the market.")
+        else:
+            st.info("⚪ **Listing status unknown** — Could not verify on Redfin.")
+
+        # Property links — use Redfin URL from listing check if available
         addr_slug = address.replace(' ', '-').replace(',', '')
         addr_query = address.replace(' ', '+')
         zillow_search = f"https://www.zillow.com/homes/{addr_slug}-Austin-TX-{zip_code}_rb/"
-        redfin_search = f"https://www.google.com/search?q=site:redfin.com+{addr_query}+Austin+TX+{zip_code}"
+        redfin_link = listing_url if listing_url else f"https://www.google.com/search?q=site:redfin.com+{addr_query}+Austin+TX+{zip_code}"
         tcad_search = f"https://stage.travis.prodigycad.com/property-search"
         google_maps = f"https://www.google.com/maps/search/{addr_query}+Austin+TX+{zip_code}"
 
         lc1, lc2, lc3, lc4 = st.columns(4)
         lc1.markdown(f"[🔗 Zillow]({zillow_search})")
-        lc2.markdown(f"[🔗 Redfin]({redfin_search})")
+        lc2.markdown(f"[🔗 Redfin]({redfin_link})")
         lc3.markdown(f"[🔗 TCAD]({tcad_search})")
         lc4.markdown(f"[🗺️ Google Maps]({google_maps})")
 
