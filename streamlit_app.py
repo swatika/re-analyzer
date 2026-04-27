@@ -460,12 +460,13 @@ def fetch_plot_info(lat: float, lon: float):
     """Fetch zoning, parcel, and flood data from Austin ArcGIS."""
     plot_data = {}
 
-    # Zoning
+    # Zoning (use envelope/buffer since point can miss on parcel boundaries)
     try:
         url = f'{ARCGIS_BASE}/Current_Zoning_gdb/FeatureServer/0/query'
+        buf = 0.0003  # ~30 meters buffer
         params = {
-            'geometry': f'{lon},{lat}',
-            'geometryType': 'esriGeometryPoint',
+            'geometry': f'{lon-buf},{lat-buf},{lon+buf},{lat+buf}',
+            'geometryType': 'esriGeometryEnvelope',
             'spatialRel': 'esriSpatialRelIntersects',
             'inSR': '4326', 'outFields': '*', 'f': 'json', 'returnGeometry': 'false',
         }
@@ -1033,7 +1034,7 @@ if submitted and address and zip_code:
         # Property links
         addr_slug = address.replace(' ', '-').replace(',', '')
         zillow_search = f"https://www.zillow.com/homes/{addr_slug}-Austin-TX-{zip_code}_rb/"
-        redfin_search = f"https://www.redfin.com/TX/Austin/{addr_slug}-{zip_code}"
+        redfin_search = f"https://www.google.com/search?q=redfin+{address.replace(' ', '+')}+Austin+TX+{zip_code}&btnI"
         tcad_search = f"https://stage.travis.prodigycad.com/property-search"
         google_maps = f"https://www.google.com/maps/search/{address.replace(' ', '+')}+Austin+TX+{zip_code}"
 
