@@ -515,7 +515,26 @@ if submitted and address and zip_code:
     total_interest = construction_interest + hold_interest
 
     # Use REAL market median if available, otherwise use user's exit assumption
-    median_psf = result.market_stats.get("median_psf", 0)
+    per_unit_sf = build_sf / max(units, 1)
+    # Filter comps to similar per-unit size (±30%)
+    similar_comps = [c for c in result.redfin_comps
+                     if c.get("sqft", 0) > 0 and abs(c["sqft"] - per_unit_sf) / per_unit_sf <= 0.30]
+    if similar_comps:
+        sim_psf = sorted([c["psf"] for c in similar_comps if c.get("psf", 0) > 0])
+        if sim_psf:
+            sim_mid = len(sim_psf) // 2
+            result.similar_stats = {
+                "median_psf": sim_psf[sim_mid],
+                "avg_psf": round(sum(sim_psf) / len(sim_psf)),
+                "min_psf": min(sim_psf),
+                "max_psf": max(sim_psf),
+                "count": len(sim_psf),
+                "size_range": f"{int(per_unit_sf * 0.7):,}–{int(per_unit_sf * 1.3):,} sf",
+            }
+    similar_median = getattr(result, 'similar_stats', {}).get('median_psf', 0)
+    all_median = result.market_stats.get("median_psf", 0)
+    # Prefer similar-size median for market comparison
+    median_psf = similar_median if similar_median > 0 else all_median
     market_exit = median_psf if median_psf > 0 else exit_psf
 
     # Adjusted exit with market trend
@@ -630,8 +649,13 @@ if submitted and address and zip_code:
     c5.metric("Risk Score", f"{risk_score}/100")
 
     if median_psf > 0:
-        st.info(f"📊 **Real Market Data:** Redfin median for new construction in {zip_code} is **${median_psf}/sf** "
-                f"({result.market_stats.get('count', 0)} sold comps). Your exit assumption is ${exit_psf}/sf.")
+        median_source = f"similar-size ({int(per_unit_sf):,} sf ±30%)" if similar_median > 0 else "all comps"
+        sim_count = getattr(result, 'similar_stats', {}).get('count', 0)
+        all_count = result.market_stats.get('count', 0)
+        st.info(f"📊 **Market Data:** Median for {median_source} is **${median_psf}/sf** "
+                f"({sim_count if similar_median > 0 else all_count} comps). "
+                f"All comps median: ${all_median}/sf ({all_count}). "
+                f"Your exit: ${exit_psf}/sf.")
 
     st.markdown("---")
 
@@ -775,14 +799,45 @@ if submitted and address and zip_code:
     # ── Comps Tab ──
     with tab_comps:
         if result.redfin_comps:
+            # Similar-size comps (per unit)
+            sim_stats = getattr(result, 'similar_stats', {})
+            if sim_stats:
+                st.subheader(f"🎯 Similar Size Comps ({sim_stats['size_range']}, per unit = {int(per_unit_sf):,} sf)")
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                sc1.metric("Median $/sf", f"${sim_stats.get('median_psf', 0)}")
+                sc2.metric("Average $/sf", f"${sim_stats.get('avg_psf', 0)}")
+                sc3.metric("Count", f"{sim_stats.get('count', 0)}")
+                sc4.metric("Range", f"${sim_stats.get('min_psf', 0)}–${sim_stats.get('max_psf', 0)}")
+
+                sim_data = []
+                for c in sorted(similar_comps, key=lambda x: x.get("psf", 0), reverse=True):
+                    if c.get("psf", 0) > 0:
+                        sim_data.append({
+                            "Address": c["address"],
+                            "Price": f"${c['price']:,}",
+                            "Size": f"{c['sqft']:,} sf",
+                            "$/sf": c["psf"],
+                            "Built": c.get("year_built", ""),
+                            "Sold": c.get("sold_date", ""),
+                            "Redfin": c.get("redfin_url", ""),
+                            "Zillow": c.get("zillow_url", ""),
+                        })
+                st.dataframe(sim_data, use_container_width=True, hide_index=True,
+                             column_config={
+                                 "Redfin": st.column_config.LinkColumn("Redfin", display_text="View"),
+                                 "Zillow": st.column_config.LinkColumn("Zillow", display_text="View"),
+                             })
+                st.markdown("---")
+
+            # All comps
             stats = result.market_stats
+            st.subheader(f"All New Construction — {zip_code} ({stats.get('count', 0)} comps)")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Median $/sf", f"${stats.get('median_psf', 0)}")
             c2.metric("Average $/sf", f"${stats.get('avg_psf', 0)}")
             c3.metric("Min $/sf", f"${stats.get('min_psf', 0)}")
             c4.metric("Max $/sf", f"${stats.get('max_psf', 0)}")
 
-            st.subheader(f"Recently Sold New Construction — {zip_code}")
             comp_data = []
             for c in sorted(result.redfin_comps, key=lambda x: x.get("psf", 0), reverse=True):
                 if c.get("psf", 0) > 0:
