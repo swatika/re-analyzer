@@ -402,34 +402,47 @@ with st.sidebar:
 
     with st.form("deal_form"):
         st.subheader("🏠 Property")
-        address = st.text_input("Property Address", placeholder="e.g., 1309 Perez St")
-        zip_code = st.text_input("ZIP Code", placeholder="e.g., 78721")
+        address = st.text_input("Property Address", placeholder="e.g., 2613 Nottingham Ln")
+        zip_code = st.text_input("ZIP Code", placeholder="e.g., 78704")
 
         st.divider()
         st.subheader("💵 Deal Numbers")
-        purchase_price = st.number_input("Purchase Price ($)", min_value=0, value=500000, step=25000)
-        build_sf = st.number_input("Total Build Size (sf)", min_value=0, value=6400, step=500)
-        units = st.number_input("Number of Units", min_value=1, value=4, step=1)
+        purchase_price = st.number_input("Purchase Price ($)", min_value=0, value=450000, step=25000)
+        build_sf = st.number_input("Total Build Size (sf)", min_value=0, value=3000, step=500)
+        units = st.number_input("Number of Units", min_value=1, value=2, step=1)
         build_cost_psf = st.number_input("Build Cost ($/sf)", min_value=0, value=250, step=25)
-        exit_psf = st.number_input("Exit Price ($/sf)", min_value=0, value=380, step=10)
+        exit_psf = st.number_input("Exit Price ($/sf)", min_value=0, value=575, step=10)
 
         st.divider()
-        st.subheader("💰 Financing")
-        ltv = st.slider("Loan to Value (%)", 0, 80, 60)
-        interest_rate = st.slider("Interest Rate (%)", 3.0, 12.0, 7.0, step=0.5)
+        st.subheader("💵 Cost Details")
+        hard_contingency_pct = st.slider("Hard Cost Contingency (%)", 0, 15, 6)
+        soft_cost_pct = st.slider("Soft Costs (arch/eng/permits) (%)", 0, 20, 10)
+        soft_contingency = st.number_input("Soft Contingency ($)", min_value=0, value=20000, step=5000)
+
+        st.divider()
+        st.subheader("💰 Construction Financing")
+        ltv = st.slider("Loan to Cost (%)", 0, 100, 70)
+        interest_rate = st.slider("Construction Interest Rate (%)", 3.0, 14.0, 8.5, step=0.5)
+        draw_factor = st.slider("Draw Factor (%)", 40, 80, 60,
+                                help="Avg % of loan funded during construction")
 
         st.divider()
         st.subheader("📅 Timeline")
-        timeline_years = st.slider("Project Timeline (Years)", 1.0, 3.0, 2.0, step=0.5)
-        delay_months = st.slider("Expected Delays (months)", 0, 12, 3)
+        build_months = st.slider("Build Duration (months)", 6, 24, 12)
+        hold_months = st.slider("Hold Period After Build (months)", 0, 36, 0,
+                                help="0 = flip immediately, 24 = rent then sell")
+        delay_months = st.slider("Expected Delays (months)", 0, 12, 0)
 
         st.divider()
         st.subheader("🏘️ Rental (Hold Strategy)")
-        rent_per_unit = st.number_input("Monthly Rent / Unit ($)", min_value=0, value=1800, step=100)
+        rent_per_unit = st.number_input("Monthly Rent / Unit ($)", min_value=0, value=3950, step=100)
+        vacancy_pct = st.slider("Vacancy / Credit Loss (%)", 0, 15, 5)
+        mgmt_fee_pct = st.slider("Management Fee (%)", 0, 15, 7)
 
         st.divider()
         st.subheader("📉 Market Risk")
-        price_decline = st.slider("Annual Price Change (%)", -15, 10, -5)
+        price_decline = st.slider("Annual Price Change (%)", -15, 10, 0)
+        exit_cost_pct = st.slider("Exit Costs (realtor/title/closing) (%)", 0, 10, 5)
 
         submitted = st.form_submit_button("🔍 Analyze — Should I Buy?", use_container_width=True, type="primary")
 
@@ -447,13 +460,45 @@ if submitted and address and zip_code:
     # ══════════════════════════════════════════════
     # STEP 2: Financial calculations
     # ══════════════════════════════════════════════
-    total_build_cost = build_cost_psf * build_sf
-    total_project_cost = purchase_price + total_build_cost
-    loan_amount = total_project_cost * (ltv / 100)
+    hard_cost = build_cost_psf * build_sf
+    hard_contingency = hard_cost * (hard_contingency_pct / 100)
+    soft_costs = hard_cost * (soft_cost_pct / 100)
+    total_dev_cost = hard_cost + hard_contingency + soft_costs + soft_contingency
+    total_project_cost = purchase_price + total_dev_cost
+
+    # Construction financing
+    loan_amount = total_dev_cost * (ltv / 100)  # LTC on development costs (not land)
     equity = total_project_cost - loan_amount
-    interest_cost = loan_amount * (interest_rate / 100) * timeline_years
-    monthly_burn = loan_amount * (interest_rate / 100) / 12
-    delay_cost = monthly_burn * delay_months
+    total_months = build_months + hold_months + delay_months
+    timeline_years = total_months / 12
+
+    # Construction interest (draw factor applies during build only)
+    construction_interest = loan_amount * (interest_rate / 100) * (draw_factor / 100) * (build_months + delay_months) / 12
+
+    # Holding costs during rental period
+    if hold_months > 0:
+        # Permanent loan interest during hold (full balance, no draw factor)
+        hold_interest = loan_amount * (interest_rate / 100) * hold_months / 12
+        # Rental income during hold
+        gross_rent = rent_per_unit * units * hold_months
+        effective_rent = gross_rent * (1 - vacancy_pct / 100)
+        mgmt_cost = effective_rent * (mgmt_fee_pct / 100)
+        # Property tax during hold
+        prop_tax = (purchase_price + hard_cost * 0.5) * 0.02 * hold_months / 12
+        # Insurance, repairs, misc during hold
+        insurance = 375 * hold_months
+        repairs = 150 * units * hold_months
+        misc = 250 * hold_months
+        total_hold_expenses = hold_interest + mgmt_cost + prop_tax + insurance + repairs + misc
+        net_rental_income = effective_rent - total_hold_expenses
+    else:
+        hold_interest = 0
+        gross_rent = 0
+        effective_rent = 0
+        net_rental_income = 0
+        total_hold_expenses = 0
+
+    total_interest = construction_interest + hold_interest
 
     # Use REAL market median if available, otherwise use user's exit assumption
     median_psf = result.market_stats.get("median_psf", 0)
@@ -465,14 +510,20 @@ if submitted and address and zip_code:
     adjusted_revenue = adjusted_exit * build_sf
     user_revenue = exit_psf * build_sf
 
-    total_cost = total_project_cost + interest_cost + delay_cost + (total_build_cost * 0.08)  # 8% contingency
-    market_profit = adjusted_revenue - total_cost
-    user_profit = user_revenue - total_cost
+    # Exit costs (realtor, title, closing)
+    exit_costs_user = user_revenue * (exit_cost_pct / 100)
+    exit_costs_market = adjusted_revenue * (exit_cost_pct / 100)
+
+    total_cost = total_project_cost + total_interest + exit_costs_user
+    market_total_cost = total_project_cost + total_interest + exit_costs_market
+
+    market_profit = adjusted_revenue - market_total_cost + net_rental_income
+    user_profit = user_revenue - total_cost + net_rental_income
 
     annual_rent = rent_per_unit * 12 * units
     cash_yield = (annual_rent / equity * 100) if equity > 0 else 0
-    annualized_return = ((adjusted_revenue / total_cost) ** (1 / timeline_years) - 1) if total_cost > 0 else 0
-    breakeven_psf = total_cost / build_sf if build_sf > 0 else 0
+    annualized_return = ((user_revenue / total_cost) ** (1 / max(timeline_years, 0.5)) - 1) if total_cost > 0 else 0
+    breakeven_psf = (total_cost - net_rental_income) / build_sf if build_sf > 0 else 0
 
     # ══════════════════════════════════════════════
     # STEP 3: Risk scoring (0-100, higher = more risk)
@@ -588,15 +639,18 @@ if submitted and address and zip_code:
 
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("**Costs**")
+            st.markdown("**Development Costs**")
             st.markdown(f"""
             | Item | Amount |
             |------|--------|
-            | Purchase Price | ${purchase_price:,.0f} |
-            | Build Cost ({build_sf:,} sf × ${build_cost_psf}/sf) | ${total_build_cost:,.0f} |
-            | Contingency (8%) | ${total_build_cost * 0.08:,.0f} |
-            | Interest ({interest_rate}% × {timeline_years} yr) | ${interest_cost:,.0f} |
-            | Delay Cost ({delay_months} mo) | ${delay_cost:,.0f} |
+            | Land / Purchase | ${purchase_price:,.0f} |
+            | Hard Cost ({build_sf:,} sf × ${build_cost_psf}/sf) | ${hard_cost:,.0f} |
+            | Hard Contingency ({hard_contingency_pct}%) | ${hard_contingency:,.0f} |
+            | Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |
+            | Soft Contingency | ${soft_contingency:,.0f} |
+            | Construction Interest | ${construction_interest:,.0f} |
+            | Hold Interest ({hold_months} mo) | ${hold_interest:,.0f} |
+            | Exit Costs ({exit_cost_pct}%) | ${exit_costs_user:,.0f} |
             | **Total All-In** | **${total_cost:,.0f}** |
             """)
 
@@ -612,17 +666,32 @@ if submitted and address and zip_code:
 
         st.markdown("---")
         st.subheader("Hold Strategy (Rental)")
-        rc1, rc2, rc3 = st.columns(3)
-        rc1.metric("Annual Rent", f"${annual_rent:,.0f}")
-        rc2.metric("Cash-on-Cash Yield", f"{cash_yield:.1f}%")
-        rc3.metric("Equity Invested", f"${equity:,.0f}")
+        if hold_months > 0:
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            rc1.metric("Gross Rent", f"${gross_rent:,.0f}", delta=f"{hold_months} months")
+            rc2.metric("Net Rental Income", f"${net_rental_income:,.0f}")
+            rc3.metric("Hold Expenses", f"${total_hold_expenses:,.0f}")
+            rc4.metric("Cash Yield (annual)", f"{cash_yield:.1f}%")
 
-        if cash_yield > 8:
-            st.success(f"✅ Rental yield ({cash_yield:.1f}%) is strong — hold strategy viable")
-        elif cash_yield > 5:
-            st.warning(f"⚠️ Rental yield ({cash_yield:.1f}%) is thin — hold strategy marginal")
+            st.markdown(f"""
+            **Rental NOI Detail ({hold_months} months):**
+            | Item | Amount |
+            |------|--------|
+            | Gross Rent ({units} × ${rent_per_unit:,}/mo × {hold_months} mo) | ${gross_rent:,.0f} |
+            | Less Vacancy ({vacancy_pct}%) | -${gross_rent * vacancy_pct / 100:,.0f} |
+            | Effective Rent | ${effective_rent:,.0f} |
+            | Less Mgmt Fee ({mgmt_fee_pct}%) | -${effective_rent * mgmt_fee_pct / 100:,.0f} |
+            | Less Property Tax | -${(purchase_price + hard_cost * 0.5) * 0.02 * hold_months / 12:,.0f} |
+            | Less Insurance/Repairs/Misc | -${(375 + 150 * units + 250) * hold_months:,.0f} |
+            | Less Loan Interest | -${hold_interest:,.0f} |
+            | **Net Rental Income** | **${net_rental_income:,.0f}** |
+            """)
         else:
-            st.error(f"❌ Rental yield ({cash_yield:.1f}%) is weak — hold strategy not recommended")
+            rc1, rc2, rc3 = st.columns(3)
+            rc1.metric("Annual Rent (if held)", f"${annual_rent:,.0f}")
+            rc2.metric("Cash-on-Cash Yield", f"{cash_yield:.1f}%")
+            rc3.metric("Equity Invested", f"${equity:,.0f}")
+            st.info("Hold period is 0 — this is a flip strategy. Set hold months > 0 to see rental analysis.")
 
         st.caption("⚠ TCAD data (appraisals, deeds, foreclosure checks) requires running the CLI tool locally for complete risk assessment.")
 
@@ -643,8 +712,10 @@ if submitted and address and zip_code:
         scenario_data = []
         for psf in test_psfs:
             revenue = psf * build_sf
-            profit = revenue - total_cost
-            margin = (profit / total_cost) * 100 if total_cost > 0 else 0
+            exit_c = revenue * (exit_cost_pct / 100)
+            sc_cost = total_project_cost + total_interest + exit_c
+            profit = revenue - sc_cost + net_rental_income
+            margin = (profit / sc_cost) * 100 if sc_cost > 0 else 0
             label = ""
             if median_psf > 0 and psf == median_psf:
                 label = "← MARKET MEDIAN"
@@ -668,17 +739,18 @@ if submitted and address and zip_code:
                                 purchase_price + 200000, 25000)
         profits_by_price = []
         for p in price_range:
-            cost = p + total_build_cost + interest_cost + delay_cost + (total_build_cost * 0.08)
-            profits_by_price.append(adjusted_revenue - cost)
+            cost = p + total_dev_cost + total_interest + (exit_psf * build_sf * exit_cost_pct / 100)
+            profits_by_price.append(exit_psf * build_sf - cost + net_rental_income)
         st.line_chart({"Purchase Price": price_range, "Profit": profits_by_price},
                       x="Purchase Price", y="Profit")
 
         st.subheader("📊 Sensitivity — Exit $/sf vs Profit")
-        exit_range = np.arange(250, 500, 10)
+        exit_range = np.arange(max(200, int(breakeven_psf) - 100), int(breakeven_psf) + 200, 10)
         profits_by_exit = []
         for e in exit_range:
             rev = e * build_sf
-            profits_by_exit.append(rev - total_cost)
+            exit_c = rev * (exit_cost_pct / 100)
+            profits_by_exit.append(rev - (total_project_cost + total_interest + exit_c) + net_rental_income)
         st.line_chart({"Exit $/sf": exit_range, "Profit": profits_by_exit},
                       x="Exit $/sf", y="Profit")
 
