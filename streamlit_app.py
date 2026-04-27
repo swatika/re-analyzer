@@ -855,7 +855,125 @@ if submitted and address and zip_code:
         """)
 
 elif submitted:
-    st.error("Please enter both an address and ZIP code.")
+    # No address/ZIP — run financial-only mode
+    st.info("💡 No address entered — showing financial analysis only. Add address + ZIP for market data, comps, and permits.")
+
+    # Create a dummy result with no market data
+    class EmptyResult:
+        street_permits = []
+        zip_permits = []
+        redfin_comps = []
+        market_stats = {}
+        sources_status = {}
+    result = EmptyResult()
+
+    # ── Financial calculations (same as full mode) ──
+    hard_cost = build_cost_psf * build_sf
+    hard_contingency = hard_cost * (hard_contingency_pct / 100)
+    soft_costs = hard_cost * (soft_cost_pct / 100)
+    soft_contingency = 0
+    total_dev_cost = hard_cost + hard_contingency + soft_costs + soft_contingency
+    total_project_cost = purchase_price + total_dev_cost
+
+    loan_amount = total_dev_cost * (ltv / 100)
+    equity = total_project_cost - loan_amount
+    total_build_months = build_months + delay_months
+    construction_interest = loan_amount * (interest_rate / 100) * (total_build_months / 12) * (draw_factor / 100)
+
+    hold_interest = 0
+    gross_rent = 0
+    effective_rent = 0
+    total_hold_expenses = 0
+    net_rental_income = 0
+    if hold_months > 0:
+        monthly_rent_total = rent_per_unit * units
+        gross_rent = monthly_rent_total * hold_months
+        effective_rent = gross_rent * (1 - vacancy_pct / 100)
+        mgmt_expense = effective_rent * (mgmt_fee_pct / 100)
+        annual_tax_est = (purchase_price + hard_cost * 0.5) * 0.02
+        property_tax = annual_tax_est * (hold_months / 12)
+        insurance = 375 * hold_months
+        repairs = 150 * units * hold_months
+        misc = 250 * hold_months
+        hold_interest = loan_amount * (interest_rate / 100) * (hold_months / 12)
+        total_hold_expenses = mgmt_expense + property_tax + insurance + repairs + misc + hold_interest
+        net_rental_income = effective_rent - total_hold_expenses
+
+    total_interest = construction_interest + hold_interest
+    timeline_years = (build_months + hold_months + delay_months) / 12
+
+    median_psf = 0
+    market_exit = exit_psf
+
+    price_change_rate = price_decline / 100
+    adjusted_exit = market_exit * ((1 + price_change_rate) ** timeline_years)
+    adjusted_revenue = adjusted_exit * build_sf
+    user_revenue = exit_psf * build_sf
+
+    exit_costs_user = user_revenue * (exit_cost_pct / 100)
+    exit_costs_market = adjusted_revenue * (exit_cost_pct / 100)
+    total_cost = total_project_cost + total_interest + exit_costs_user
+    market_total_cost = total_project_cost + total_interest + exit_costs_market
+    market_profit = adjusted_revenue - market_total_cost + net_rental_income
+    user_profit = user_revenue - total_cost + net_rental_income
+
+    annual_rent = rent_per_unit * 12 * units
+    cash_yield = (annual_rent / equity * 100) if equity > 0 else 0
+    annualized_return = ((user_revenue / total_cost) ** (1 / max(timeline_years, 0.5)) - 1) if total_cost > 0 else 0
+    breakeven_psf = (total_cost - net_rental_income) / build_sf if build_sf > 0 else 0
+
+    # ── Display financial results ──
+    st.subheader("📊 Deal Snapshot")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total All-In Cost", f"${total_cost:,.0f}")
+    col2.metric("Sale Revenue", f"${user_revenue:,.0f}")
+    col3.metric("Profit", f"${user_profit:,.0f}", delta=f"{annualized_return*100:.1f}% ann.")
+    col4.metric("Break-Even", f"${breakeven_psf:.0f}/sf")
+
+    if user_profit > 200000:
+        st.success(f"✅ STRONG — ${user_profit:,.0f} profit at ${exit_psf}/sf exit")
+    elif user_profit > 50000:
+        st.warning(f"⚠️ MARGINAL — ${user_profit:,.0f} profit, sensitive to delays/overruns")
+    else:
+        st.error(f"❌ WEAK/LOSS — ${user_profit:,.0f} at ${exit_psf}/sf exit")
+
+    # Cost breakdown
+    st.subheader("💰 Cost Breakdown")
+    st.markdown(f"""
+    | Item | Amount |
+    |------|--------|
+    | Land / Purchase | ${purchase_price:,.0f} |
+    | Hard Cost ({build_sf:,} sf × ${build_cost_psf}/sf) | ${hard_cost:,.0f} |
+    | Hard Contingency ({hard_contingency_pct}%) | ${hard_contingency:,.0f} |
+    | Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |
+    | Construction Interest | ${construction_interest:,.0f} |
+    | Hold Interest ({hold_months} mo) | ${hold_interest:,.0f} |
+    | Exit Costs ({exit_cost_pct}%) | ${exit_costs_user:,.0f} |
+    | **Total All-In** | **${total_cost:,.0f}** |
+    """)
+
+    if hold_months > 0:
+        st.subheader("🏠 Rental NOI")
+        st.markdown(f"""
+        | Item | Amount |
+        |------|--------|
+        | Gross Rent ({units} × ${rent_per_unit:,}/mo × {hold_months} mo) | ${gross_rent:,.0f} |
+        | Less Vacancy ({vacancy_pct}%) | -${gross_rent * vacancy_pct / 100:,.0f} |
+        | Less Mgmt ({mgmt_fee_pct}%) | -${effective_rent * mgmt_fee_pct / 100:,.0f} |
+        | Less Tax/Insurance/Repairs | -${(purchase_price + hard_cost * 0.5) * 0.02 * hold_months / 12 + 375 * hold_months + 150 * units * hold_months + 250 * hold_months:,.0f} |
+        | Less Hold Interest | -${hold_interest:,.0f} |
+        | **Net Rental Income** | **${net_rental_income:,.0f}** |
+        """)
+
+    # Sensitivity
+    st.subheader("📈 Sensitivity — Exit $/sf vs Profit")
+    exit_range = np.arange(max(200, int(breakeven_psf) - 100), int(breakeven_psf) + 200, 10)
+    profits_by_exit = []
+    for e in exit_range:
+        rev = e * build_sf
+        exit_c = rev * (exit_cost_pct / 100)
+        profits_by_exit.append(rev - (total_project_cost + total_interest + exit_c) + net_rental_income)
+    st.line_chart({"Exit $/sf": exit_range, "Profit": profits_by_exit}, x="Exit $/sf", y="Profit")
 else:
     # Landing page
     st.markdown("""
