@@ -937,8 +937,27 @@ with st.sidebar:
         st.subheader("💵 Cost Details")
         hard_contingency_pct = st.slider("Hard Cost Contingency (%)", 0, 15, 6,
                                          help="Buffer for unexpected construction cost overruns (typically 5-10%)")
-        soft_cost_pct = st.number_input("Soft Costs (arch/eng/permits) (%)", min_value=0.0, max_value=20.0, value=10.4, step=0.5,
-                                        help="Architecture, engineering, permits, surveys — as % of hard cost")
+        split_soft = st.toggle("Split Soft Cost Categories", value=False,
+                               help="Break down soft costs into individual line items instead of one percentage")
+        if split_soft:
+            arch_pct = st.number_input("Architecture & Design (%)", min_value=0.0, max_value=10.0, value=3.0, step=0.5,
+                                       help="Architect fees — as % of hard cost")
+            eng_pct = st.number_input("Engineering (structural/MEP) (%)", min_value=0.0, max_value=10.0, value=2.0, step=0.5,
+                                      help="Structural, mechanical, electrical, plumbing engineering — as % of hard cost")
+            permit_fee_pct = st.number_input("Permits & Impact Fees (%)", min_value=0.0, max_value=10.0, value=2.5, step=0.5,
+                                             help="City permits, impact fees, utility connections — as % of hard cost")
+            survey_pct = st.number_input("Surveys & Geotech (%)", min_value=0.0, max_value=5.0, value=1.0, step=0.5,
+                                         help="Land survey, soil testing, environmental — as % of hard cost")
+            insurance_dev_pct = st.number_input("Builder's Risk Insurance (%)", min_value=0.0, max_value=5.0, value=1.0, step=0.5,
+                                                help="Builder's risk / liability during construction — as % of hard cost")
+            other_soft_pct = st.number_input("Other Soft Costs (%)", min_value=0.0, max_value=10.0, value=0.9, step=0.1,
+                                             help="Legal, accounting, misc — as % of hard cost")
+            soft_cost_pct = arch_pct + eng_pct + permit_fee_pct + survey_pct + insurance_dev_pct + other_soft_pct
+            st.caption(f"**Total Soft: {soft_cost_pct:.1f}%**")
+        else:
+            soft_cost_pct = st.number_input("Soft Costs (arch/eng/permits) (%)", min_value=0.0, max_value=30.0, value=10.4, step=0.5,
+                                            help="Architecture, engineering, permits, surveys — as % of hard cost")
+            arch_pct = eng_pct = permit_fee_pct = survey_pct = insurance_dev_pct = other_soft_pct = 0.0
         soft_contingency = st.number_input("Soft Contingency ($)", min_value=0, value=20000, step=5000,
                                            help="Fixed buffer for unexpected soft cost items")
 
@@ -1301,13 +1320,24 @@ if submitted and address and zip_code:
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Development & Financing**")
+            soft_cost_line = ""
+            if split_soft:
+                soft_cost_line = f"""| — Architecture & Design ({arch_pct}%) | ${hard_cost * arch_pct / 100:,.0f} |
+            | — Engineering ({eng_pct}%) | ${hard_cost * eng_pct / 100:,.0f} |
+            | — Permits & Impact Fees ({permit_fee_pct}%) | ${hard_cost * permit_fee_pct / 100:,.0f} |
+            | — Surveys & Geotech ({survey_pct}%) | ${hard_cost * survey_pct / 100:,.0f} |
+            | — Builder's Risk Insurance ({insurance_dev_pct}%) | ${hard_cost * insurance_dev_pct / 100:,.0f} |
+            | — Other Soft ({other_soft_pct}%) | ${hard_cost * other_soft_pct / 100:,.0f} |
+            | **Soft Costs Total ({soft_cost_pct:.1f}%)** | **${soft_costs:,.0f}** |"""
+            else:
+                soft_cost_line = f"| Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |"
             st.markdown(f"""
             | Item | Amount |
             |------|--------|
             | Land / Purchase | ${purchase_price:,.0f} |
             | Hard Cost ({build_sf:,} sf × ${build_cost_psf}/sf) | ${hard_cost:,.0f} |
             | Hard Contingency ({hard_contingency_pct}%) | ${hard_contingency:,.0f} |
-            | Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |
+            {soft_cost_line}
             | Soft Contingency | ${soft_contingency:,.0f} |
             | **Non-Land Dev Cost** | **${total_dev_cost:,.0f}** |
             | Construction Debt ({ltv}% LTV) | ${loan_amount:,.0f} |
@@ -1963,13 +1993,24 @@ elif submitted:
 
     # Cost breakdown
     st.subheader("💰 Cost Breakdown")
+    soft_line_fin = ""
+    if split_soft:
+        soft_line_fin = f"""| — Architecture & Design ({arch_pct}%) | ${hard_cost * arch_pct / 100:,.0f} |
+    | — Engineering ({eng_pct}%) | ${hard_cost * eng_pct / 100:,.0f} |
+    | — Permits & Impact Fees ({permit_fee_pct}%) | ${hard_cost * permit_fee_pct / 100:,.0f} |
+    | — Surveys & Geotech ({survey_pct}%) | ${hard_cost * survey_pct / 100:,.0f} |
+    | — Builder's Risk Insurance ({insurance_dev_pct}%) | ${hard_cost * insurance_dev_pct / 100:,.0f} |
+    | — Other Soft ({other_soft_pct}%) | ${hard_cost * other_soft_pct / 100:,.0f} |
+    | **Soft Costs Total ({soft_cost_pct:.1f}%)** | **${soft_costs:,.0f}** |"""
+    else:
+        soft_line_fin = f"| Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |"
     st.markdown(f"""
     | Item | Amount |
     |------|--------|
     | Land / Purchase | ${purchase_price:,.0f} |
     | Hard Cost ({build_sf:,} sf × ${build_cost_psf}/sf) | ${hard_cost:,.0f} |
     | Hard Contingency ({hard_contingency_pct}%) | ${hard_contingency:,.0f} |
-    | Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |
+    {soft_line_fin}
     | Construction Interest | ${construction_interest:,.0f} |
     | Hold Debt Service ({hold_months} mo) | ${hold_interest:,.0f} |
     | **Sale Costs ({exit_cost_pct:.1f}%)** | **${exit_costs_user:,.0f}** |
