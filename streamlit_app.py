@@ -957,7 +957,7 @@ with st.sidebar:
         st.divider()
         st.subheader("📅 Timeline")
         build_months = st.slider("Build Duration (months)", 6, 24, 12)
-        hold_months = st.slider("Hold Period After Build (months)", 0, 36, 0,
+        hold_months = st.slider("Hold Period After Build (months)", 0, 36, 24,
                                 help="0 = flip immediately, 24 = rent then sell")
         delay_months = st.slider("Expected Delays (months)", 0, 12, 0)
 
@@ -966,11 +966,30 @@ with st.sidebar:
         rent_per_unit = st.number_input("Monthly Rent / Unit ($)", min_value=0, value=3950, step=100)
         vacancy_pct = st.slider("Vacancy / Credit Loss (%)", 0, 15, 5)
         mgmt_fee_pct = st.slider("Management Fee (%)", 0, 15, 7)
+        perm_mortgage_rate = st.slider("Permanent Mortgage Rate (%)", 3.0, 12.0, 7.0, step=0.25,
+                                       help="Rate after construction loan converts to permanent")
+        amortization_years = st.number_input("Amortization (years)", min_value=15, max_value=30, value=30, step=5)
+        taxable_value_psf = st.number_input("Taxable Value ($/sf)", min_value=0, value=550, step=25,
+                                            help="Assessed value for property tax during hold")
+        prop_tax_rate = st.slider("Property Tax Rate (%)", 1.0, 4.0, 2.0, step=0.1)
+        insurance_monthly = st.number_input("Landlord Insurance ($/mo)", min_value=0, value=375, step=25)
+        repairs_per_unit = st.number_input("Repairs Reserve ($/unit/mo)", min_value=0, value=150, step=25)
+        common_utilities = st.number_input("Common Utilities / Misc ($/mo)", min_value=0, value=250, step=25)
+        leasing_reserve = st.number_input("Leasing / Turnover Reserve ($/mo)", min_value=0, value=250, step=25)
 
         st.divider()
         st.subheader("📉 Market Risk")
         price_decline = st.slider("Annual Price Change (%)", -15, 10, 0)
-        exit_cost_pct = st.slider("Exit Costs (realtor/title/closing) (%)", 0, 10, 5)
+
+        st.divider()
+        st.subheader("💸 Sale / Exit Costs")
+        broker_fee_pct = st.slider("Broker / Agent Fee (%)", 0.0, 6.0, 3.0, step=0.5,
+                                   help="Listing + buyer agent commission")
+        title_closing_pct = st.slider("Title + Closing Costs (%)", 0.0, 3.0, 1.5, step=0.25,
+                                      help="Title insurance, escrow, recording fees")
+        seller_concessions_pct = st.slider("Seller Concessions (%)", 0.0, 3.0, 0.5, step=0.25,
+                                           help="Buyer credits, repairs, warranty")
+        exit_cost_pct = broker_fee_pct + title_closing_pct + seller_concessions_pct
 
         submitted = st.form_submit_button("🔍 Analyze — Should I Buy?", use_container_width=True, type="primary")
 
@@ -1005,19 +1024,38 @@ if submitted and address and zip_code:
 
     # Holding costs during rental period
     if hold_months > 0:
-        # Permanent loan interest during hold (full balance, no draw factor)
-        hold_interest = loan_amount * (interest_rate / 100) * hold_months / 12
+        # Permanent mortgage debt service (amortized PMT on construction debt)
+        monthly_perm_rate = perm_mortgage_rate / 100 / 12
+        n_payments = amortization_years * 12
+        if monthly_perm_rate > 0:
+            monthly_debt_service = loan_amount * (monthly_perm_rate * (1 + monthly_perm_rate) ** n_payments) / ((1 + monthly_perm_rate) ** n_payments - 1)
+        else:
+            monthly_debt_service = loan_amount / n_payments
+        hold_interest = monthly_debt_service * hold_months
+
+        # Loan balance after hold (amortized)
+        if monthly_perm_rate > 0:
+            loan_balance_after_hold = loan_amount * (1 + monthly_perm_rate) ** hold_months - monthly_debt_service * ((1 + monthly_perm_rate) ** hold_months - 1) / monthly_perm_rate
+        else:
+            loan_balance_after_hold = loan_amount - (monthly_debt_service * hold_months)
+
         # Rental income during hold
         gross_rent = rent_per_unit * units * hold_months
         effective_rent = gross_rent * (1 - vacancy_pct / 100)
         mgmt_cost = effective_rent * (mgmt_fee_pct / 100)
-        # Property tax during hold
-        prop_tax = (purchase_price + hard_cost * 0.5) * 0.02 * hold_months / 12
-        # Insurance, repairs, misc during hold
-        insurance = 375 * hold_months
-        repairs = 150 * units * hold_months
-        misc = 250 * hold_months
-        total_hold_expenses = hold_interest + mgmt_cost + prop_tax + insurance + repairs + misc
+        # Property tax during hold (based on taxable value)
+        prop_tax = build_sf * taxable_value_psf * (prop_tax_rate / 100) * hold_months / 12
+        # Operating expenses during hold
+        insurance = insurance_monthly * hold_months
+        repairs = repairs_per_unit * units * hold_months
+        misc = common_utilities * hold_months
+        leasing = leasing_reserve * hold_months
+        total_hold_expenses = hold_interest + mgmt_cost + prop_tax + insurance + repairs + misc + leasing
+
+        # Monthly NOI (before debt service)
+        monthly_noi = (effective_rent - mgmt_cost - prop_tax - insurance - repairs - misc - leasing) / max(hold_months, 1)
+        monthly_cf_after_debt = monthly_noi - monthly_debt_service
+
         net_rental_income = effective_rent - total_hold_expenses
     else:
         hold_interest = 0
@@ -1025,6 +1063,16 @@ if submitted and address and zip_code:
         effective_rent = 0
         net_rental_income = 0
         total_hold_expenses = 0
+        loan_balance_after_hold = loan_amount
+        monthly_debt_service = 0
+        monthly_noi = 0
+        monthly_cf_after_debt = 0
+        prop_tax = 0
+        insurance = 0
+        repairs = 0
+        misc = 0
+        leasing = 0
+        mgmt_cost = 0
 
     total_interest = construction_interest + hold_interest
 
@@ -1219,8 +1267,11 @@ if submitted and address and zip_code:
             | Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |
             | Soft Contingency | ${soft_contingency:,.0f} |
             | Construction Interest | ${construction_interest:,.0f} |
-            | Hold Interest ({hold_months} mo) | ${hold_interest:,.0f} |
-            | Exit Costs ({exit_cost_pct}%) | ${exit_costs_user:,.0f} |
+            | Hold Debt Service ({hold_months} mo) | ${hold_interest:,.0f} |
+            | **Sale Costs ({exit_cost_pct:.1f}%)** | **${exit_costs_user:,.0f}** |
+            | — Broker/Agent ({broker_fee_pct}%) | ${user_revenue * broker_fee_pct / 100:,.0f} |
+            | — Title + Closing ({title_closing_pct}%) | ${user_revenue * title_closing_pct / 100:,.0f} |
+            | — Seller Concessions ({seller_concessions_pct}%) | ${user_revenue * seller_concessions_pct / 100:,.0f} |
             | **Total All-In** | **${total_cost:,.0f}** |
             """)
 
@@ -1237,25 +1288,34 @@ if submitted and address and zip_code:
         st.markdown("---")
         st.subheader("Hold Strategy (Rental)")
         if hold_months > 0:
-            rc1, rc2, rc3, rc4 = st.columns(4)
+            rc1, rc2, rc3, rc4, rc5 = st.columns(5)
             rc1.metric("Gross Rent", f"${gross_rent:,.0f}", delta=f"{hold_months} months")
             rc2.metric("Net Rental Income", f"${net_rental_income:,.0f}")
-            rc3.metric("Hold Expenses", f"${total_hold_expenses:,.0f}")
-            rc4.metric("Cash Yield (annual)", f"{cash_yield:.1f}%")
+            rc3.metric("Monthly Cash Flow", f"${monthly_cf_after_debt:,.0f}")
+            rc4.metric("Monthly Debt Service", f"${monthly_debt_service:,.0f}")
+            rc5.metric("Loan Balance After Hold", f"${loan_balance_after_hold:,.0f}")
 
             st.markdown(f"""
             **Rental NOI Detail ({hold_months} months):**
-            | Item | Amount |
-            |------|--------|
-            | Gross Rent ({units} × ${rent_per_unit:,}/mo × {hold_months} mo) | ${gross_rent:,.0f} |
-            | Less Vacancy ({vacancy_pct}%) | -${gross_rent * vacancy_pct / 100:,.0f} |
-            | Effective Rent | ${effective_rent:,.0f} |
-            | Less Mgmt Fee ({mgmt_fee_pct}%) | -${effective_rent * mgmt_fee_pct / 100:,.0f} |
-            | Less Property Tax | -${(purchase_price + hard_cost * 0.5) * 0.02 * hold_months / 12:,.0f} |
-            | Less Insurance/Repairs/Misc | -${(375 + 150 * units + 250) * hold_months:,.0f} |
-            | Less Loan Interest | -${hold_interest:,.0f} |
-            | **Net Rental Income** | **${net_rental_income:,.0f}** |
+            | Item | Monthly | Total ({hold_months} mo) |
+            |------|---------|---------|
+            | Gross Rent ({units} × ${rent_per_unit:,}/mo) | ${rent_per_unit * units:,.0f} | ${gross_rent:,.0f} |
+            | Less Vacancy ({vacancy_pct}%) | -${rent_per_unit * units * vacancy_pct / 100:,.0f} | -${gross_rent * vacancy_pct / 100:,.0f} |
+            | **Effective Gross Income** | **${effective_rent / hold_months:,.0f}** | **${effective_rent:,.0f}** |
+            | Less Mgmt Fee ({mgmt_fee_pct}%) | -${mgmt_cost / hold_months:,.0f} | -${mgmt_cost:,.0f} |
+            | Less Property Tax ({prop_tax_rate}%) | -${prop_tax / hold_months:,.0f} | -${prop_tax:,.0f} |
+            | Less Insurance | -${insurance_monthly:,.0f} | -${insurance:,.0f} |
+            | Less Repairs ({units} × ${repairs_per_unit}/mo) | -${repairs_per_unit * units:,.0f} | -${repairs:,.0f} |
+            | Less Utilities/Misc | -${common_utilities:,.0f} | -${misc:,.0f} |
+            | Less Leasing/Turnover | -${leasing_reserve:,.0f} | -${leasing:,.0f} |
+            | **NOI (before debt)** | **${monthly_noi:,.0f}** | **${monthly_noi * hold_months:,.0f}** |
+            | Less Debt Service ({perm_mortgage_rate}%, {amortization_years}yr) | -${monthly_debt_service:,.0f} | -${monthly_debt_service * hold_months:,.0f} |
+            | **Cash Flow After Debt** | **${monthly_cf_after_debt:,.0f}** | **${monthly_cf_after_debt * hold_months:,.0f}** |
             """)
+
+            if monthly_cf_after_debt < 0:
+                st.warning(f"⚠️ **Negative cash flow** of ${monthly_cf_after_debt:,.0f}/mo during hold period. "
+                          f"You'll need ${abs(monthly_cf_after_debt * hold_months):,.0f} additional equity to carry this property.")
         else:
             rc1, rc2, rc3 = st.columns(3)
             rc1.metric("Annual Rent (if held)", f"${annual_rent:,.0f}")
@@ -1758,18 +1818,29 @@ elif submitted:
     effective_rent = 0
     total_hold_expenses = 0
     net_rental_income = 0
+    monthly_debt_service = 0
+    loan_balance_after_hold = loan_amount
     if hold_months > 0:
         monthly_rent_total = rent_per_unit * units
         gross_rent = monthly_rent_total * hold_months
         effective_rent = gross_rent * (1 - vacancy_pct / 100)
         mgmt_expense = effective_rent * (mgmt_fee_pct / 100)
-        annual_tax_est = (purchase_price + hard_cost * 0.5) * 0.02
-        property_tax = annual_tax_est * (hold_months / 12)
-        insurance = 375 * hold_months
-        repairs = 150 * units * hold_months
-        misc = 250 * hold_months
-        hold_interest = loan_amount * (interest_rate / 100) * (hold_months / 12)
-        total_hold_expenses = mgmt_expense + property_tax + insurance + repairs + misc + hold_interest
+        prop_tax = build_sf * taxable_value_psf * (prop_tax_rate / 100) * hold_months / 12
+        insurance = insurance_monthly * hold_months
+        repairs = repairs_per_unit * units * hold_months
+        misc = common_utilities * hold_months
+        leasing = leasing_reserve * hold_months
+        # Permanent mortgage debt service
+        monthly_perm = perm_mortgage_rate / 100 / 12
+        n_pay = amortization_years * 12
+        if monthly_perm > 0:
+            monthly_debt_service = loan_amount * (monthly_perm * (1 + monthly_perm) ** n_pay) / ((1 + monthly_perm) ** n_pay - 1)
+            loan_balance_after_hold = loan_amount * (1 + monthly_perm) ** hold_months - monthly_debt_service * ((1 + monthly_perm) ** hold_months - 1) / monthly_perm
+        else:
+            monthly_debt_service = loan_amount / n_pay
+            loan_balance_after_hold = loan_amount - (monthly_debt_service * hold_months)
+        hold_interest = monthly_debt_service * hold_months
+        total_hold_expenses = mgmt_expense + prop_tax + insurance + repairs + misc + leasing + hold_interest
         net_rental_income = effective_rent - total_hold_expenses
 
     total_interest = construction_interest + hold_interest
@@ -1820,22 +1891,26 @@ elif submitted:
     | Hard Contingency ({hard_contingency_pct}%) | ${hard_contingency:,.0f} |
     | Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |
     | Construction Interest | ${construction_interest:,.0f} |
-    | Hold Interest ({hold_months} mo) | ${hold_interest:,.0f} |
-    | Exit Costs ({exit_cost_pct}%) | ${exit_costs_user:,.0f} |
+    | Hold Debt Service ({hold_months} mo) | ${hold_interest:,.0f} |
+    | **Sale Costs ({exit_cost_pct:.1f}%)** | **${exit_costs_user:,.0f}** |
+    | — Broker/Agent ({broker_fee_pct}%) | ${user_revenue * broker_fee_pct / 100:,.0f} |
+    | — Title + Closing ({title_closing_pct}%) | ${user_revenue * title_closing_pct / 100:,.0f} |
+    | — Seller Concessions ({seller_concessions_pct}%) | ${user_revenue * seller_concessions_pct / 100:,.0f} |
     | **Total All-In** | **${total_cost:,.0f}** |
     """)
 
     if hold_months > 0:
-        st.subheader("🏠 Rental NOI")
+        st.subheader("🏠 Rental Hold Detail")
         st.markdown(f"""
-        | Item | Amount |
-        |------|--------|
-        | Gross Rent ({units} × ${rent_per_unit:,}/mo × {hold_months} mo) | ${gross_rent:,.0f} |
-        | Less Vacancy ({vacancy_pct}%) | -${gross_rent * vacancy_pct / 100:,.0f} |
-        | Less Mgmt ({mgmt_fee_pct}%) | -${effective_rent * mgmt_fee_pct / 100:,.0f} |
-        | Less Tax/Insurance/Repairs | -${(purchase_price + hard_cost * 0.5) * 0.02 * hold_months / 12 + 375 * hold_months + 150 * units * hold_months + 250 * hold_months:,.0f} |
-        | Less Hold Interest | -${hold_interest:,.0f} |
-        | **Net Rental Income** | **${net_rental_income:,.0f}** |
+        | Item | Monthly | Total ({hold_months} mo) |
+        |------|---------|---------|
+        | Gross Rent ({units} × ${rent_per_unit:,}/mo) | ${rent_per_unit * units:,.0f} | ${gross_rent:,.0f} |
+        | Less Vacancy ({vacancy_pct}%) | -${rent_per_unit * units * vacancy_pct / 100:,.0f} | -${gross_rent * vacancy_pct / 100:,.0f} |
+        | Less Mgmt ({mgmt_fee_pct}%) | | -${effective_rent * mgmt_fee_pct / 100:,.0f} |
+        | Less Property Tax ({prop_tax_rate}%) | | -${prop_tax:,.0f} |
+        | Less Insurance/Repairs/Misc/Leasing | | -${insurance + repairs + misc + leasing:,.0f} |
+        | Less Debt Service ({perm_mortgage_rate}%, {amortization_years}yr) | -${monthly_debt_service:,.0f} | -${hold_interest:,.0f} |
+        | **Net Rental Income** | | **${net_rental_income:,.0f}** |
         """)
 
     # Sensitivity
