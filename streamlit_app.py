@@ -2906,7 +2906,7 @@ if show_analysis and result is not None:
     # ── Download Tab ──
     with tab_download:
         st.subheader("Download Report")
-        if result.redfin_comps or result.street_permits:
+        if result is not None:
             report_bytes = generate_report_bytes(
                 result, address, zip_code, street_name,
                 purchase_price, build_sf, exit_psf, build_cost_psf
