@@ -278,6 +278,8 @@ class RedfinComps:
         if not region_id:
             return []
         user_agents = [
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
         ]
@@ -357,6 +359,8 @@ class RedfinComps:
         if not region_id:
             return []
         user_agents = [
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
         ]
@@ -508,9 +512,11 @@ class RedfinComps:
         region_id = self._get_region_id(zip_code)
         if not region_id:
             return {'status': 'Unknown', 'url': ''}
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-        }
+        user_agents = [
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        ]
         # Extract street number + name for matching
         addr_parts = address.upper().replace(',', '').split()
         addr_num = addr_parts[0] if addr_parts else ''
@@ -518,35 +524,37 @@ class RedfinComps:
 
         # Check: 1=Active, 130=Pending/Under Contract, 9=Sold
         for status_code, label in [(1, 'Active'), (130, 'Pending'), (9, 'Sold')]:
-            try:
-                url = (
-                    f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=100'
-                    f'&region_id={region_id}&region_type=2'
-                    f'&status={status_code}&uipt=1&v=8'
-                )
-                resp = requests.get(url, headers=headers, timeout=20)
-                if resp.status_code != 200:
+            for ua in user_agents:
+                try:
+                    url = (
+                        f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=100'
+                        f'&region_id={region_id}&region_type=2'
+                        f'&status={status_code}&uipt=1&v=8'
+                    )
+                    headers = {'User-Agent': ua}
+                    resp = requests.get(url, headers=headers, timeout=20)
+                    if resp.status_code != 200:
+                        continue
+                    lines = resp.text.strip().split('\n')
+                    for i, line in enumerate(lines):
+                        if 'SALE TYPE' in line:
+                            reader = csv.DictReader(io.StringIO('\n'.join(lines[i:])))
+                            for row in reader:
+                                row_addr = (row.get('ADDRESS') or '').upper()
+                                if addr_num in row_addr and addr_street in row_addr:
+                                    redfin_url = ''
+                                    for key in row.keys():
+                                        if key and 'URL' in key.upper():
+                                            redfin_url = row[key] or ''
+                                            break
+                                    return {
+                                        'status': label,
+                                        'price': row.get('PRICE', ''),
+                                        'url': redfin_url,
+                                    }
+                            break
+                except Exception:
                     continue
-                lines = resp.text.strip().split('\n')
-                for i, line in enumerate(lines):
-                    if 'SALE TYPE' in line:
-                        reader = csv.DictReader(io.StringIO('\n'.join(lines[i:])))
-                        for row in reader:
-                            row_addr = (row.get('ADDRESS') or '').upper()
-                            if addr_num in row_addr and addr_street in row_addr:
-                                redfin_url = ''
-                                for key in row.keys():
-                                    if key and 'URL' in key.upper():
-                                        redfin_url = row[key] or ''
-                                        break
-                                return {
-                                    'status': label,
-                                    'price': row.get('PRICE', ''),
-                                    'url': redfin_url,
-                                }
-                        break
-            except Exception:
-                continue
         return {'status': 'Not Found', 'url': ''}
 
 def generate_report_bytes(result: AnalysisResult, address: str, zip_code: str,
@@ -754,6 +762,24 @@ def run_analysis(address: str, zip_code: str, street_name: str):
         result.sources_status['comps_radius'] = comps_radius
     else:
         result.sources_status['redfin'] = '⚠ No data'
+        # Fallback: use Census Bureau median home value to estimate $/sf
+        try:
+            census = fetch_census_home_value(zip_code)
+            if census.get('median_value') and census['median_value'] > 0:
+                # Estimate $/sf from Census median value / typical new construction size
+                typical_sf = 1800  # typical new construction in Austin
+                est_psf = round(census['median_value'] / typical_sf)
+                result.market_stats = {
+                    "median_psf": est_psf,
+                    "avg_psf": est_psf,
+                    "min_psf": est_psf,
+                    "max_psf": est_psf,
+                    "count": 0,
+                    "source": "Census Bureau (estimated)",
+                }
+                result.sources_status['redfin'] = '⚠ Census fallback'
+        except Exception:
+            pass
 
     # Listing status (active/pending/sold)
     result.listing_status = redfin_api.check_listing_status(address, zip_code)
@@ -916,8 +942,6 @@ OVERLAY_EXPLANATIONS = {
 def fetch_census_rents(zip_code: str) -> dict:
     """Fetch median rent data from Census Bureau ACS 5-year survey (no API key needed)."""
     try:
-        # B25064_001E = Median gross rent
-        # B25031_002E-006E = Median rent by bedrooms (0BR, 1BR, 2BR, 3BR, 4BR+)
         url = 'https://api.census.gov/data/2022/acs/acs5'
         params = {
             'get': 'B25064_001E,B25031_002E,B25031_003E,B25031_004E,B25031_005E,B25031_006E',
@@ -944,6 +968,26 @@ def fetch_census_rents(zip_code: str) -> dict:
             'rent_4br_plus': _int(values[5]),
             'source': 'Census ACS 5-Year (2022)',
         }
+    except Exception:
+        return {}
+
+
+def fetch_census_home_value(zip_code: str) -> dict:
+    """Fetch median home value from Census Bureau ACS (no API key needed)."""
+    try:
+        url = 'https://api.census.gov/data/2022/acs/acs5'
+        params = {
+            'get': 'B25077_001E',
+            'for': f'zip code tabulation area:{zip_code}'
+        }
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code != 200:
+            return {}
+        data = resp.json()
+        if len(data) < 2:
+            return {}
+        val = data[1][0]
+        return {'median_value': int(val) if val else 0}
     except Exception:
         return {}
 
@@ -2330,7 +2374,16 @@ if show_analysis and result is not None:
                              "Zillow": st.column_config.LinkColumn("Zillow", display_text="View"),
                          })
         else:
-            st.warning("No Redfin comps available. Redfin may be blocking requests from this server.")
+            if result.market_stats and result.market_stats.get('source', '').startswith('Census'):
+                st.warning("⚠️ Redfin blocked — using **Census Bureau estimate** as fallback.")
+                stats = result.market_stats
+                st.subheader(f"📊 Estimated Market Value — ZIP {zip_code}")
+                c1, c2 = st.columns(2)
+                c1.metric("Estimated $/sf", f"${stats.get('median_psf', 0)}")
+                c2.metric("Source", "Census ACS 2022")
+                st.caption("Based on Census median home value ÷ typical new construction size. For accurate comps, check Redfin/Zillow directly.")
+            else:
+                st.warning("No Redfin comps available. Redfin may be blocking requests from this server.")
 
     # ── Active Listings Tab ──
     with tab_active:
