@@ -12,7 +12,7 @@ import io
 import csv
 import time
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -108,7 +108,8 @@ class AustinPermits:
     BASE_URL = "https://data.austintexas.gov/resource/3syk-w9eu.json"
 
     def search_street(self, street_name: str, zip_code: str) -> list[Permit]:
-        where = f"permit_location like '%{street_name.upper()}%' AND permittype='BP' AND work_class='New' AND original_zip='{zip_code}' AND issue_date >= '2024-01-01T00:00:00'"
+        two_years_ago = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT00:00:00')
+        where = f"permit_location like '%{street_name.upper()}%' AND permittype='BP' AND work_class='New' AND original_zip='{zip_code}' AND issue_date >= '{two_years_ago}'"
         params = {"$where": where, "$order": "issue_date DESC", "$limit": 100}
         for attempt in range(2):
             try:
@@ -121,7 +122,8 @@ class AustinPermits:
         return []
 
     def search_zip(self, zip_code: str, limit: int = 200) -> list[Permit]:
-        where = f"original_zip='{zip_code}' AND permittype='BP' AND work_class='New' AND issue_date >= '2024-01-01T00:00:00'"
+        two_years_ago = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT00:00:00')
+        where = f"original_zip='{zip_code}' AND permittype='BP' AND work_class='New' AND issue_date >= '{two_years_ago}'"
         params = {"$where": where, "$order": "issue_date DESC", "$limit": limit}
         for attempt in range(2):
             try:
