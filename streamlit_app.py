@@ -151,6 +151,8 @@ class AnalysisResult:
     redfin_comps: list = field(default_factory=list)
     neighborhood_comps: list = field(default_factory=list)
     active_comps: list = field(default_factory=list)
+    rental_comps: list = field(default_factory=list)
+    rental_stats: dict = field(default_factory=dict)
     market_stats: dict = field(default_factory=dict)
     neighborhood_stats: dict = field(default_factory=dict)
     active_stats: dict = field(default_factory=dict)
@@ -420,6 +422,80 @@ class RedfinComps:
                 if lat and lon:
                     comps = [c for c in comps if c.get('distance_mi', 99) <= radius_miles]
                 return sorted(comps, key=lambda x: x.get('distance_mi', 99))
+            except Exception:
+                time.sleep(2)
+                continue
+        return []
+
+    def get_rental_listings(self, zip_code: str, lat: float = 0, lon: float = 0, radius_miles: float = 2.0) -> list[dict]:
+        """Get active rental listings in ZIP from Redfin, filtered by distance if lat/lon provided."""
+        region_id = self._get_region_id(zip_code)
+        if not region_id:
+            return []
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        ]
+        # Redfin rental CSV: status=1 (active), is_rentals=true
+        url = (
+            f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=200'
+            f'&ord=redfin-recommended-asc&page_number=1'
+            f'&region_id={region_id}&region_type=2'
+            f'&status=1&uipt=1,2,3&v=8&is_rentals=true'
+        )
+        for ua in user_agents:
+            try:
+                headers = {'User-Agent': ua}
+                resp = requests.get(url, headers=headers, timeout=20)
+                if resp.status_code != 200:
+                    time.sleep(2)
+                    continue
+                lines = resp.text.strip().split('\n')
+                header_idx = None
+                for i, line in enumerate(lines):
+                    if line.startswith('SALE TYPE') or line.startswith('"SALE TYPE') or 'PRICE' in line.upper()[:50]:
+                        header_idx = i
+                        break
+                if header_idx is None:
+                    continue
+                reader = csv.DictReader(io.StringIO('\n'.join(lines[header_idx:])))
+                rentals = []
+                for row in reader:
+                    try:
+                        # For rentals, PRICE is monthly rent
+                        price_str = (row.get('PRICE') or row.get('PRICE/SQ.FT.') or '0').replace(',', '').replace('$', '').replace('/mo', '')
+                        rent = int(float(price_str)) if price_str else 0
+                        sqft_str = (row.get('SQUARE FEET') or '0').replace(',', '')
+                        sqft = int(float(sqft_str)) if sqft_str else 0
+                        rent_psf = round(rent / sqft, 2) if sqft > 0 else 0
+                        if rent > 0:
+                            redfin_url = ''
+                            for key in row.keys():
+                                if key and 'URL' in key.upper():
+                                    redfin_url = row[key] or ''
+                                    break
+                            raw_addr = (row.get('ADDRESS') or '').strip()
+                            city = (row.get('CITY') or '').strip()
+                            comp_lat = float(row.get('LATITUDE') or 0)
+                            comp_lon = float(row.get('LONGITUDE') or 0)
+                            dist = 0
+                            if comp_lat and comp_lon and lat and lon:
+                                dist = ((comp_lat - lat) * 69) ** 2 + ((comp_lon - lon) * 60) ** 2
+                                dist = dist ** 0.5
+                            rentals.append({
+                                'address': f"{raw_addr}, {city}",
+                                'rent': rent, 'sqft': sqft, 'rent_psf': rent_psf,
+                                'beds': row.get('BEDS') or '',
+                                'baths': row.get('BATHS') or '',
+                                'property_type': row.get('PROPERTY TYPE') or row.get('HOME TYPE') or '',
+                                'redfin_url': redfin_url,
+                                'distance_mi': round(dist, 2),
+                            })
+                    except (ValueError, ZeroDivisionError):
+                        continue
+                if lat and lon:
+                    rentals = [r for r in rentals if r.get('distance_mi', 99) <= radius_miles]
+                return sorted(rentals, key=lambda x: x.get('distance_mi', 99))
             except Exception:
                 time.sleep(2)
                 continue
@@ -697,6 +773,20 @@ def run_analysis(address: str, zip_code: str, street_name: str):
                     "min_psf": min(a_psf),
                     "max_psf": max(a_psf),
                     "count": len(a_psf),
+                }
+
+        # Rental listings (2 mile radius)
+        result.rental_comps = redfin_api.get_rental_listings(zip_code, lat, lon, radius_miles=2.0)
+        if result.rental_comps:
+            rents = sorted([r["rent"] for r in result.rental_comps if r.get("rent", 0) > 0])
+            if rents:
+                mid = len(rents) // 2
+                result.rental_stats = {
+                    "median_rent": rents[mid],
+                    "avg_rent": round(sum(rents) / len(rents)),
+                    "min_rent": min(rents),
+                    "max_rent": max(rents),
+                    "count": len(rents),
                 }
 
     return result
@@ -2254,6 +2344,42 @@ if show_analysis and result is not None:
     with tab_rental:
         st.subheader("💰 Rental Market Analysis")
 
+        # ── Active Rental Listings ──
+        st.markdown("### 🏠 Active Rental Listings — Within 2 Miles")
+        if result.rental_comps:
+            r_stats = result.rental_stats
+            if r_stats:
+                rk1, rk2, rk3, rk4 = st.columns(4)
+                rk1.metric("Median Rent", f"${r_stats.get('median_rent', 0):,}/mo")
+                rk2.metric("Average Rent", f"${r_stats.get('avg_rent', 0):,}/mo")
+                rk3.metric("Count", f"{r_stats.get('count', 0)}")
+                rk4.metric("Range", f"${r_stats.get('min_rent', 0):,}–${r_stats.get('max_rent', 0):,}")
+
+            rental_data = []
+            for r in result.rental_comps:
+                if r.get("rent", 0) > 0:
+                    rental_data.append({
+                        "Address": r["address"],
+                        "Rent": f"${r['rent']:,}/mo",
+                        "Size": f"{r['sqft']:,} sf" if r.get('sqft') else "—",
+                        "$/SF/mo": f"${r['rent_psf']:.2f}" if r.get('rent_psf') else "—",
+                        "Beds": r.get("beds", ""),
+                        "Baths": r.get("baths", ""),
+                        "Type": r.get("property_type", ""),
+                        "Distance": f"{r.get('distance_mi', 0):.1f} mi",
+                        "Redfin": r.get("redfin_url", ""),
+                    })
+            if rental_data:
+                st.dataframe(rental_data, use_container_width=True, hide_index=True,
+                             column_config={
+                                 "Redfin": st.column_config.LinkColumn("Redfin", display_text="View"),
+                             })
+            st.caption("💡 Active rental listings from Redfin within 2 miles of the subject property.")
+        else:
+            st.info("No active rental listings found on Redfin within 2 miles. Check the research links below for more rental data.")
+
+        st.markdown("---")
+
         # ── a) Your Rent Assumptions ──
         gross_monthly_rent = rent_per_unit * units
         gross_annual_rent = gross_monthly_rent * 12
@@ -2603,8 +2729,8 @@ if show_analysis and result is not None:
                             'profit': market_profit,
                             'margin_pct': (market_profit / total_cost * 100) if total_cost > 0 else 0,
                             'breakeven_psf': breakeven_psf,
-                            'median_psf': median_psf,
-                            'comp_count': result.market_stats.get('count', 0),
+                            'median_psf': median_psf if median_psf > 0 else result.market_stats.get('median_psf', 0),
+                            'comp_count': result.market_stats.get('count', 0) or len(result.redfin_comps),
                             'risk_score': risk_score,
                             'verdict': verdict,
                             'listing_status': result.listing_status.get('status', 'Unknown') if hasattr(result, 'listing_status') else 'Unknown',
