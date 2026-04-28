@@ -944,28 +944,39 @@ with st.sidebar:
 
     with st.form("deal_form"):
         st.subheader("🏠 Property")
-        address = st.text_input("Property Address", placeholder="e.g., 2613 Nottingham Ln")
-        zip_code = st.text_input("ZIP Code", placeholder="e.g., 78704")
+        address = st.text_input("Property Address", placeholder="e.g., 2613 Nottingham Ln",
+                               help="Street address of the property you're analyzing")
+        zip_code = st.text_input("ZIP Code", placeholder="e.g., 78704",
+                                 help="Used to pull comps, permits, and zoning data")
 
         st.divider()
         st.subheader("💵 Deal Numbers")
-        purchase_price = st.number_input("Purchase Price ($)", min_value=0, value=450000, step=25000)
-        build_sf = st.number_input("Total Build Size (sf)", min_value=0, value=3000, step=500)
-        units = st.number_input("Number of Units", min_value=1, value=2, step=1)
-        build_cost_psf = st.number_input("Build Cost ($/sf)", min_value=0, value=250, step=25)
-        exit_psf = st.number_input("Exit Price ($/sf)", min_value=0, value=575, step=10)
+        purchase_price = st.number_input("Purchase Price ($)", min_value=0, value=450000, step=25000,
+                                         help="Land acquisition cost or total purchase price")
+        build_sf = st.number_input("Total Build Size (sf)", min_value=0, value=3000, step=500,
+                                   help="Total finished square footage across all units")
+        units = st.number_input("Number of Units", min_value=1, value=2, step=1,
+                                help="Number of residential units (e.g., 2 for a duplex)")
+        build_cost_psf = st.number_input("Build Cost ($/sf)", min_value=0, value=250, step=25,
+                                         help="Hard construction cost per square foot (labor + materials)")
+        exit_psf = st.number_input("Exit Price ($/sf)", min_value=0, value=575, step=10,
+                                   help="Your target sale price per square foot")
 
         st.divider()
         st.subheader("💵 Cost Details")
-        hard_contingency_pct = st.slider("Hard Cost Contingency (%)", 0, 15, 6)
-        soft_cost_pct = st.number_input("Soft Costs (arch/eng/permits) (%)", min_value=0.0, max_value=20.0, value=10.4, step=0.5)
-        soft_contingency = st.number_input("Soft Contingency ($)", min_value=0, value=20000, step=5000)
+        hard_contingency_pct = st.slider("Hard Cost Contingency (%)", 0, 15, 6,
+                                         help="Buffer for unexpected construction cost overruns (typically 5-10%)")
+        soft_cost_pct = st.number_input("Soft Costs (arch/eng/permits) (%)", min_value=0.0, max_value=20.0, value=10.4, step=0.5,
+                                        help="Architecture, engineering, permits, surveys — as % of hard cost")
+        soft_contingency = st.number_input("Soft Contingency ($)", min_value=0, value=20000, step=5000,
+                                           help="Fixed buffer for unexpected soft cost items")
 
         st.divider()
         st.subheader("💰 Construction Financing")
         ltv = st.slider("Loan to Cost (%)", 0, 100, 100,
                         help="% of non-land development cost funded by debt")
-        interest_rate = st.slider("Construction Interest Rate (%)", 3.0, 14.0, 8.0, step=0.5)
+        interest_rate = st.slider("Construction Interest Rate (%)", 3.0, 14.0, 8.0, step=0.5,
+                                  help="Annual interest rate on construction loan")
         draw_factor = st.slider("Draw Factor (%)", 40, 80, 60,
                                 help="Avg % of loan funded during construction")
         loan_fee_pct = st.slider("Construction Loan Fees (%)", 0.0, 3.0, 1.0, step=0.25,
@@ -973,30 +984,42 @@ with st.sidebar:
 
         st.divider()
         st.subheader("📅 Timeline")
-        build_months = st.slider("Build Duration (months)", 6, 24, 12)
+        build_months = st.slider("Build Duration (months)", 6, 24, 12,
+                                help="Estimated construction timeline from permit to CO")
         hold_months = st.slider("Hold Period After Build (months)", 0, 36, 24,
                                 help="0 = flip immediately, 24 = rent then sell")
-        delay_months = st.slider("Expected Delays (months)", 0, 12, 0)
+        delay_months = st.slider("Expected Delays (months)", 0, 12, 0,
+                                help="Buffer for permitting delays, weather, supply issues")
 
         st.divider()
         st.subheader("🏘️ Rental (Hold Strategy)")
-        rent_per_unit = st.number_input("Monthly Rent / Unit ($)", min_value=0, value=3950, step=100)
-        vacancy_pct = st.slider("Vacancy / Credit Loss (%)", 0, 15, 5)
-        mgmt_fee_pct = st.slider("Management Fee (%)", 0, 15, 7)
+        rent_per_unit = st.number_input("Monthly Rent / Unit ($)", min_value=0, value=3950, step=100,
+                                      help="Expected monthly rent per unit after lease-up")
+        vacancy_pct = st.slider("Vacancy / Credit Loss (%)", 0, 15, 5,
+                                help="% of gross rent lost to vacancy and bad debt")
+        mgmt_fee_pct = st.slider("Management Fee (%)", 0, 15, 7,
+                                 help="Property management fee as % of effective rent")
         perm_mortgage_rate = st.slider("Permanent Mortgage Rate (%)", 3.0, 12.0, 7.0, step=0.25,
                                        help="Rate after construction loan converts to permanent")
-        amortization_years = st.number_input("Amortization (years)", min_value=15, max_value=30, value=30, step=5)
+        amortization_years = st.number_input("Amortization (years)", min_value=15, max_value=30, value=30, step=5,
+                                            help="Loan payoff schedule length (longer = lower monthly payment)")
         taxable_value_psf = st.number_input("Taxable Value ($/sf)", min_value=0, value=550, step=25,
                                             help="Assessed value for property tax during hold")
-        prop_tax_rate = st.slider("Property Tax Rate (%)", 1.0, 4.0, 2.0, step=0.1)
-        insurance_monthly = st.number_input("Landlord Insurance ($/mo)", min_value=0, value=375, step=25)
-        repairs_per_unit = st.number_input("Repairs Reserve ($/unit/mo)", min_value=0, value=150, step=25)
-        common_utilities = st.number_input("Common Utilities / Misc ($/mo)", min_value=0, value=250, step=25)
-        leasing_reserve = st.number_input("Leasing / Turnover Reserve ($/mo)", min_value=0, value=250, step=25)
+        prop_tax_rate = st.slider("Property Tax Rate (%)", 1.0, 4.0, 2.0, step=0.1,
+                                  help="Annual property tax rate (Austin is typically ~2%)")
+        insurance_monthly = st.number_input("Landlord Insurance ($/mo)", min_value=0, value=375, step=25,
+                                            help="Monthly hazard + liability insurance premium")
+        repairs_per_unit = st.number_input("Repairs Reserve ($/unit/mo)", min_value=0, value=150, step=25,
+                                           help="Monthly reserve per unit for maintenance and repairs")
+        common_utilities = st.number_input("Common Utilities / Misc ($/mo)", min_value=0, value=250, step=25,
+                                           help="Owner-paid utilities, landscaping, pest control, etc.")
+        leasing_reserve = st.number_input("Leasing / Turnover Reserve ($/mo)", min_value=0, value=250, step=25,
+                                          help="Reserve for tenant turnover, marketing, and lease-up costs")
 
         st.divider()
         st.subheader("📉 Market Risk")
-        price_decline = st.slider("Annual Price Change (%)", -15, 10, 0)
+        price_decline = st.slider("Annual Price Change (%)", -15, 10, 0,
+                                  help="Expected annual change in market prices (negative = decline)")
 
         st.divider()
         st.subheader("💸 Sale / Exit Costs")
