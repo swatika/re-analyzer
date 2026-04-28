@@ -1597,10 +1597,9 @@ if submitted and address and zip_code:
                       "- The permits API may be temporarily unavailable — try clicking **Analyze** again")
 
         # All permit types for the street
+        st.markdown("---")
+        st.subheader(f"📋 All Permits — {street_name} St (past 2 years)")
         if result.street_all_permits:
-            st.markdown("---")
-            st.subheader(f"📋 All Permits — {street_name} St (past 2 years)")
-
             # Group by type
             type_map = {'BP': '🏗️ Building', 'EP': '⚡ Electrical', 'PP': '🔧 Plumbing',
                         'MP': '🌬️ Mechanical', 'DP': '🚧 Demolition'}
@@ -1627,6 +1626,8 @@ if submitted and address and zip_code:
                     "Date": p.issue_date,
                 })
             st.dataframe(all_data, use_container_width=True, hide_index=True)
+        else:
+            st.info("No permits found for this street in the past 2 years.")
 
     # ── Plot Info Tab ──
     with tab_plot:
