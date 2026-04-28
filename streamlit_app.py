@@ -192,7 +192,8 @@ class RedfinComps:
             pass
         return None
 
-    def get_sold_comps(self, zip_code: str) -> list[dict]:
+    def get_sold_comps(self, zip_code: str, lat: float = 0, lon: float = 0, radius_miles: float = 0) -> list[dict]:
+        """Get sold comps in ZIP via region_id. If lat/lon/radius provided, compute distance and filter."""
         region_id = self._get_region_id(zip_code)
         if not region_id:
             return []
@@ -204,74 +205,6 @@ class RedfinComps:
             f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=200'
             f'&ord=redfin-recommended-asc&page_number=1'
             f'&region_id={region_id}&region_type=2'
-            f'&sold_within_days=730&status=9&uipt=1&v=8&min_year_built=2020'
-        )
-        for ua in user_agents:
-            try:
-                headers = {'User-Agent': ua}
-                resp = requests.get(url, headers=headers, timeout=20)
-                if resp.status_code != 200:
-                    continue
-                lines = resp.text.strip().split('\n')
-                header_idx = None
-                for i, line in enumerate(lines):
-                    if line.startswith('SALE TYPE') or line.startswith('"SALE TYPE'):
-                        header_idx = i
-                        break
-                if header_idx is None:
-                    continue
-                reader = csv.DictReader(io.StringIO('\n'.join(lines[header_idx:])))
-                comps = []
-                for row in reader:
-                    try:
-                        price_str = (row.get('PRICE') or '0').replace(',', '').replace('$', '')
-                        price = int(float(price_str)) if price_str else 0
-                        sqft_str = (row.get('SQUARE FEET') or '0').replace(',', '')
-                        sqft = int(float(sqft_str)) if sqft_str else 0
-                        year_str = row.get('YEAR BUILT') or '0'
-                        year = int(float(year_str)) if year_str else 0
-                        psf = round(price / sqft) if sqft > 0 else 0
-                        if price > 0 and year >= 2020:
-                            redfin_url = ''
-                            for key in row.keys():
-                                if key and 'URL' in key.upper():
-                                    redfin_url = row[key] or ''
-                                    break
-                            raw_addr = (row.get('ADDRESS') or '').strip()
-                            city = (row.get('CITY') or '').strip()
-                            state = (row.get('STATE OR PROVINCE') or 'TX').strip()
-                            zipcode = (row.get('ZIP OR POSTAL CODE') or '').strip()
-                            zillow_query = f"{raw_addr} {city} {state} {zipcode}".replace(' ', '-')
-                            comps.append({
-                                'address': f"{raw_addr}, {city}",
-                                'price': price, 'sqft': sqft, 'psf': psf,
-                                'year_built': year,
-                                'sold_date': row.get('SOLD DATE') or '',
-                                'beds': row.get('BEDS') or '',
-                                'baths': row.get('BATHS') or '',
-                                'redfin_url': redfin_url,
-                                'zillow_url': f"https://www.zillow.com/homes/{zillow_query}_rb/",
-                            })
-                    except (ValueError, ZeroDivisionError):
-                        continue
-                return comps
-            except Exception:
-                continue
-        return []
-
-    def get_neighborhood_comps(self, lat: float, lon: float, radius_miles: float = 1.0) -> list[dict]:
-        """Get sold comps within a radius using lat/lon bounding box."""
-        lat_offset = radius_miles / 69.0
-        lon_offset = radius_miles / 60.0
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        ]
-        url = (
-            f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=200'
-            f'&ord=redfin-recommended-asc&page_number=1'
-            f'&lat_min={lat - lat_offset:.6f}&lat_max={lat + lat_offset:.6f}'
-            f'&lng_min={lon - lon_offset:.6f}&lng_max={lon + lon_offset:.6f}'
             f'&sold_within_days=730&status=9&uipt=1&v=8&min_year_built=2020'
         )
         for ua in user_agents:
@@ -311,10 +244,10 @@ class RedfinComps:
                             state = (row.get('STATE OR PROVINCE') or 'TX').strip()
                             zipcode = (row.get('ZIP OR POSTAL CODE') or '').strip()
                             zillow_query = f"{raw_addr} {city} {state} {zipcode}".replace(' ', '-')
+                            dist = 0
                             comp_lat = float(row.get('LATITUDE') or 0)
                             comp_lon = float(row.get('LONGITUDE') or 0)
-                            dist = 0
-                            if comp_lat and comp_lon:
+                            if comp_lat and comp_lon and lat and lon:
                                 dist = ((comp_lat - lat) * 69) ** 2 + ((comp_lon - lon) * 60) ** 2
                                 dist = dist ** 0.5
                             comps.append({
@@ -330,6 +263,8 @@ class RedfinComps:
                             })
                     except (ValueError, ZeroDivisionError):
                         continue
+                if radius_miles > 0 and lat and lon:
+                    comps = [c for c in comps if c.get('distance_mi', 99) <= radius_miles]
                 return sorted(comps, key=lambda x: x.get('distance_mi', 99))
             except Exception:
                 time.sleep(2)
@@ -642,12 +577,12 @@ def run_analysis(address: str, zip_code: str, street_name: str):
     # Geocode for radius-based queries
     lat, lon = geocode_address(address, zip_code)
 
-    # Redfin — Sold comps (try 1 mile radius first, fallback to ZIP-wide)
+    # Redfin — Sold comps (1 mile radius, fallback to ZIP-wide)
     comps_radius = True
     if lat and lon:
-        result.redfin_comps = redfin_api.get_neighborhood_comps(lat, lon, radius_miles=1.0)
+        result.redfin_comps = redfin_api.get_sold_comps(zip_code, lat, lon, radius_miles=1.0)
     if not result.redfin_comps:
-        result.redfin_comps = redfin_api.get_sold_comps(zip_code)
+        result.redfin_comps = redfin_api.get_sold_comps(zip_code, lat, lon, radius_miles=0)
         comps_radius = False
     if result.redfin_comps:
         psf_values = sorted([c["psf"] for c in result.redfin_comps if c.get("psf", 0) > 0])
