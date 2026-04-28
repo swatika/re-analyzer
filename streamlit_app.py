@@ -68,6 +68,12 @@ End with a clear recommendation."""
         if resp.status_code == 200:
             data = resp.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
+        elif resp.status_code == 429:
+            return ("⚠️ **Gemini API quota exceeded.** The free tier has a daily limit.\n\n"
+                    "**Options:**\n"
+                    "- Wait until tomorrow (quota resets daily)\n"
+                    "- Create a new API key at [Google AI Studio](https://aistudio.google.com/apikey) "
+                    "and update it in Streamlit Cloud → Settings → Secrets")
         else:
             return f"⚠️ AI analysis unavailable (HTTP {resp.status_code}): {resp.text[:200]}"
     except Exception as e:
