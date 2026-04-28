@@ -1980,8 +1980,8 @@ if show_analysis and result is not None:
         else:
             risk_flags.append(("🟢", f"Exit ${exit_psf}/sf is **at or below** market median ${median_psf}/sf — Conservative"))
     else:
-        risk_score += 20
-        risk_flags.append(("🟡", "No market comp data — cannot validate exit assumptions"))
+        risk_score += 30
+        risk_flags.append(("🔴", "**No market comp data** — cannot validate exit assumptions. Redfin may be blocking this server."))
 
     # Competition risks
     if len(active_permits) >= 5:
@@ -2019,11 +2019,14 @@ if show_analysis and result is not None:
         verdict_color = "red"
         verdict_emoji = "❌"
         verdict_detail = "Too many risk factors. This deal doesn't pencil at current market rates."
-    elif risk_score >= 25 or market_profit < 100000:
+    elif risk_score >= 25 or market_profit < 100000 or median_psf == 0:
         verdict = "CAUTION"
         verdict_color = "orange"
         verdict_emoji = "⚠️"
-        verdict_detail = "Deal is marginal. Only proceed if you can negotiate better terms."
+        if median_psf == 0:
+            verdict_detail = "No market data to validate assumptions. Cannot confirm this is a good deal — research comps manually."
+        else:
+            verdict_detail = "Deal is marginal. Only proceed if you can negotiate better terms."
     else:
         verdict = "BUY"
         verdict_color = "green"
