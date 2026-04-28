@@ -37,7 +37,8 @@ def generate_ai_summary(deal_data: dict) -> str:
 
     prompt = f"""You are a real estate investment analyst. Analyze this deal and give a clear, 
 plain-English summary that a beginner investor can understand. Be specific with numbers.
-Cover: Is it a good deal? What are the risks? What should they watch out for?
+Cover: Is it a good deal? What are the risks? How does the rental income look?
+Compare their exit price to actual nearby sold prices. Comment on competition from permits.
 
 DEAL DATA:
 - Address: {deal_data.get('address', 'N/A')}, ZIP: {deal_data.get('zip_code', 'N/A')}
@@ -57,7 +58,28 @@ DEAL DATA:
 - Monthly Rent: ${deal_data.get('monthly_rent', 0):,.0f}
 - Rental NOI/Year: ${deal_data.get('rental_noi', 0):,.0f}
 
-Keep your response under 300 words. Use bullet points for key takeaways. 
+COMPARABLE SALES (nearby sold properties):
+{deal_data.get('top_comps', 'No comp data')}
+
+CONSTRUCTION ACTIVITY:
+- Active permits on street: {deal_data.get('active_permits', 0)}
+- Completed projects: {deal_data.get('completed_permits', 0)}
+- Notable builders: {deal_data.get('permit_builders', 'N/A')}
+
+HOLD/RENTAL ANALYSIS ({deal_data.get('hold_months', 0)} month hold):
+- Monthly NOI: ${deal_data.get('monthly_noi', 0):,.0f}
+- Monthly Cash Flow After Debt: ${deal_data.get('monthly_cf_after_debt', 0):,.0f}
+- Equity Multiple: {deal_data.get('equity_multiple', 0):.2f}x
+- Annualized Return: {deal_data.get('annualized_return', 0):.1f}%
+- Cash-on-Cash Yield: {deal_data.get('cash_yield', 0):.1f}%
+
+FINANCING:
+- Loan Amount: ${deal_data.get('loan_amount', 0):,.0f}
+- Construction Interest: ${deal_data.get('construction_interest', 0):,.0f}
+- Build Cost: ${deal_data.get('build_cost_psf', 0)}/sf
+- Build Timeline: {deal_data.get('build_months', 0)} months
+
+Keep your response under 500 words. Use bullet points for key takeaways. 
 End with a clear recommendation."""
 
     models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
@@ -1941,8 +1963,8 @@ if show_analysis and result is not None:
     # ══════════════════════════════════════════════
     # TABS
     # ══════════════════════════════════════════════
-    tab_verdict, tab_scenarios, tab_comps, tab_active, tab_permits, tab_plot, tab_ai, tab_download = st.tabs([
-        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏠 Active Listings", "🏗️ Permits", "📋 Plot Info", "🤖 AI Analysis", "📄 Download"
+    tab_verdict, tab_scenarios, tab_comps, tab_active, tab_rental, tab_permits, tab_plot, tab_ai, tab_download = st.tabs([
+        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏠 Active Listings", "💰 Rental Comps", "🏗️ Permits", "📋 Plot Info", "🤖 AI Analysis", "📄 Download"
     ])
 
     # ── Risk Analysis Tab ──
@@ -2228,6 +2250,96 @@ if show_analysis and result is not None:
         else:
             st.info("No active listings found within 1 mile.")
 
+    # ── Rental Comps Tab ──
+    with tab_rental:
+        st.subheader("💰 Rental Market Analysis")
+
+        # ── a) Your Rent Assumptions ──
+        gross_monthly_rent = rent_per_unit * units
+        gross_annual_rent = gross_monthly_rent * 12
+        rent_per_sf = gross_monthly_rent / build_sf if build_sf > 0 else 0
+        gross_yield = (gross_annual_rent / total_project_cost * 100) if total_project_cost > 0 else 0
+
+        st.markdown("### 📋 Your Rent Assumptions")
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        rc1.metric("Gross Monthly Rent", f"${gross_monthly_rent:,.0f}")
+        rc2.metric("Annual Rent", f"${gross_annual_rent:,.0f}")
+        rc3.metric("Rent/SF/mo", f"${rent_per_sf:.2f}")
+        rc4.metric("Gross Yield", f"{gross_yield:.1f}%")
+
+        # ── b) Market Rent Estimates ──
+        st.markdown("### 📊 Market Rent Estimates")
+
+        # 1% rule estimate
+        one_pct_monthly = total_project_cost * 0.01
+        one_pct_annual = one_pct_monthly * 12
+        one_pct_per_sf = one_pct_monthly / build_sf if build_sf > 0 else 0
+
+        # Cap rate estimates from sold comps
+        estimated_value = median_psf * build_sf if median_psf > 0 else total_project_cost
+        cap5_annual = estimated_value * 0.05
+        cap5_monthly = cap5_annual / 12
+        cap5_per_sf = cap5_monthly / build_sf if build_sf > 0 else 0
+
+        cap7_annual = estimated_value * 0.07
+        cap7_monthly = cap7_annual / 12
+        cap7_per_sf = cap7_monthly / build_sf if build_sf > 0 else 0
+
+        comparison_data = [
+            {"Method": "Your Assumption", "Monthly Rent": f"${gross_monthly_rent:,.0f}", "Annual": f"${gross_annual_rent:,.0f}", "$/SF/mo": f"${rent_per_sf:.2f}"},
+            {"Method": "1% Rule (of cost)", "Monthly Rent": f"${one_pct_monthly:,.0f}", "Annual": f"${one_pct_annual:,.0f}", "$/SF/mo": f"${one_pct_per_sf:.2f}"},
+            {"Method": "5% Cap Rate", "Monthly Rent": f"${cap5_monthly:,.0f}", "Annual": f"${cap5_annual:,.0f}", "$/SF/mo": f"${cap5_per_sf:.2f}"},
+            {"Method": "7% Cap Rate", "Monthly Rent": f"${cap7_monthly:,.0f}", "Annual": f"${cap7_annual:,.0f}", "$/SF/mo": f"${cap7_per_sf:.2f}"},
+        ]
+        st.dataframe(comparison_data, use_container_width=True, hide_index=True)
+
+        if median_psf > 0:
+            st.caption(f"💡 Cap rate estimates based on comps median ${median_psf}/sf × {build_sf:,} sf = ${estimated_value:,.0f} estimated value")
+        else:
+            st.caption("💡 Cap rate estimates based on total project cost (no comp data available)")
+
+        # ── c) Rent Sensitivity Analysis ──
+        st.markdown("### 📈 Rent Sensitivity Analysis")
+
+        sensitivity_data = []
+        for pct in [-20, -10, 0, 10, 20]:
+            adj_rent_monthly = gross_monthly_rent * (1 + pct / 100)
+            adj_rent_annual = adj_rent_monthly * 12
+
+            # Recalc NOI and CF for this rent level
+            eff_rent_mo = adj_rent_monthly * (1 - vacancy_pct / 100)
+            mgmt_mo = eff_rent_mo * (mgmt_fee_pct / 100)
+            tax_mo = build_sf * taxable_value_psf * (prop_tax_rate / 100) / 12
+            sens_monthly_noi = eff_rent_mo - mgmt_mo - tax_mo - insurance_monthly - (repairs_per_unit * units) - common_utilities - leasing_reserve
+            sens_monthly_cf = sens_monthly_noi - monthly_debt_service
+            sens_annual_cf = sens_monthly_cf * 12
+            sens_coc = (sens_annual_cf / total_equity_invested * 100) if total_equity_invested > 0 else 0
+
+            label = f"{pct:+d}%" if pct != 0 else "0% (Base)"
+            sensitivity_data.append({
+                "Scenario": label,
+                "Monthly Rent": f"${adj_rent_monthly:,.0f}",
+                "Monthly NOI": f"${sens_monthly_noi:,.0f}",
+                "Monthly CF After Debt": f"${sens_monthly_cf:,.0f}",
+                "Annual CF": f"${sens_annual_cf:,.0f}",
+                "Cash-on-Cash": f"{sens_coc:.1f}%",
+            })
+
+        st.dataframe(sensitivity_data, use_container_width=True, hide_index=True)
+        st.caption("💡 The **0% (Base)** row matches your assumed rent. Negative CF means you'd need to fund the shortfall from cash reserves.")
+
+        # ── d) Research Links ──
+        st.markdown("### 🔗 Research Links")
+        zillow_rental = f"https://www.zillow.com/homes/for_rent/{zip_code}_rb/"
+        apartments_url = f"https://www.apartments.com/{zip_code}/"
+        rentometer_url = f"https://www.rentometer.com/analysis/new?address={zip_code}"
+
+        lk1, lk2, lk3 = st.columns(3)
+        lk1.markdown(f"[🏠 Zillow Rentals]({zillow_rental})")
+        lk2.markdown(f"[🏢 Apartments.com]({apartments_url})")
+        lk3.markdown(f"[📊 Rentometer]({rentometer_url})")
+        st.caption("Use these links to research actual rental listings and market data in your ZIP code.")
+
     # ── Permits Tab ──
     with tab_permits:
         st.subheader(f"New Construction Permits — {street_name} St")
@@ -2472,6 +2584,12 @@ if show_analysis and result is not None:
             else:
                 if st.button("🧠 Generate AI Analysis", type="primary"):
                     with st.spinner("AI is analyzing your deal..."):
+                        # Build top comps summary
+                        top_comps_text = ""
+                        if result.redfin_comps:
+                            for c in sorted(result.redfin_comps, key=lambda x: x.get('distance_mi', 0))[:5]:
+                                top_comps_text += f"  - {c['address']}: ${c['price']:,} ({c['sqft']:,}sf, ${c['psf']}/sf, sold {c.get('sold_date', 'N/A')}, {c.get('distance_mi', 0):.1f}mi away)\n"
+
                         deal_data = {
                             'address': address,
                             'zip_code': zip_code,
@@ -2492,7 +2610,27 @@ if show_analysis and result is not None:
                             'listing_status': result.listing_status.get('status', 'Unknown') if hasattr(result, 'listing_status') else 'Unknown',
                             'zoning': 'N/A',
                             'monthly_rent': rent_per_unit * units,
-                            'rental_noi': 0,
+                            'rental_noi': monthly_noi * 12,
+                            # Top 5 sold comps summary
+                            'top_comps': top_comps_text,
+                            # Permit activity
+                            'active_permits': len([p for p in result.street_permits if p.status == 'Active']),
+                            'completed_permits': len([p for p in result.street_permits if p.status == 'Final']),
+                            'permit_builders': ', '.join(set(p.builder for p in result.street_permits[:5] if p.builder != 'Unknown')),
+                            # Hold model financials
+                            'hold_months': hold_months,
+                            'monthly_noi': monthly_noi,
+                            'monthly_cf_after_debt': monthly_cf_after_debt,
+                            'monthly_debt_service': monthly_debt_service,
+                            'equity_multiple': equity_multiple,
+                            'total_equity_invested': total_equity_invested,
+                            'annualized_return': annualized_return * 100,
+                            'cash_yield': cash_yield,
+                            # Construction
+                            'build_months': build_months,
+                            'construction_interest': construction_interest,
+                            'loan_amount': loan_amount,
+                            'build_cost_psf': build_cost_psf,
                         }
                         ai_text = generate_ai_summary(deal_data)
                         if ai_text:
