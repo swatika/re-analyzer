@@ -93,8 +93,10 @@ class AnalysisResult:
     zip_permits: list = field(default_factory=list)
     redfin_comps: list = field(default_factory=list)
     neighborhood_comps: list = field(default_factory=list)
+    active_comps: list = field(default_factory=list)
     market_stats: dict = field(default_factory=dict)
     neighborhood_stats: dict = field(default_factory=dict)
+    active_stats: dict = field(default_factory=dict)
     sources_status: dict = field(default_factory=dict)
     listing_status: dict = field(default_factory=dict)
 
@@ -312,6 +314,75 @@ class RedfinComps:
                             'sold_date': row.get('SOLD DATE') or '',
                             'beds': row.get('BEDS') or '',
                             'baths': row.get('BATHS') or '',
+                            'redfin_url': redfin_url,
+                            'zillow_url': f"https://www.zillow.com/homes/{zillow_query}_rb/",
+                            'distance_mi': round(dist, 2),
+                        })
+                except (ValueError, ZeroDivisionError):
+                    continue
+            return sorted(comps, key=lambda x: x.get('distance_mi', 99))
+        except Exception:
+            return []
+
+    def get_active_listings(self, lat: float, lon: float, radius_miles: float = 1.0) -> list[dict]:
+        """Get currently active (for sale) listings within a radius."""
+        lat_offset = radius_miles / 69.0
+        lon_offset = radius_miles / 60.0
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        }
+        url = (
+            f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=200'
+            f'&ord=redfin-recommended-asc&page_number=1'
+            f'&lat_min={lat - lat_offset:.6f}&lat_max={lat + lat_offset:.6f}'
+            f'&lng_min={lon - lon_offset:.6f}&lng_max={lon + lon_offset:.6f}'
+            f'&status=1&uipt=1&v=8'
+        )
+        try:
+            resp = requests.get(url, headers=headers, timeout=20)
+            if resp.status_code != 200:
+                return []
+            lines = resp.text.strip().split('\n')
+            header_idx = None
+            for i, line in enumerate(lines):
+                if line.startswith('SALE TYPE') or line.startswith('"SALE TYPE'):
+                    header_idx = i
+                    break
+            if header_idx is None:
+                return []
+            reader = csv.DictReader(io.StringIO('\n'.join(lines[header_idx:])))
+            comps = []
+            for row in reader:
+                try:
+                    price_str = (row.get('PRICE') or '0').replace(',', '').replace('$', '')
+                    price = int(float(price_str)) if price_str else 0
+                    sqft_str = (row.get('SQUARE FEET') or '0').replace(',', '')
+                    sqft = int(float(sqft_str)) if sqft_str else 0
+                    psf = round(price / sqft) if sqft > 0 else 0
+                    if price > 0:
+                        redfin_url = ''
+                        for key in row.keys():
+                            if key and 'URL' in key.upper():
+                                redfin_url = row[key] or ''
+                                break
+                        raw_addr = (row.get('ADDRESS') or '').strip()
+                        city = (row.get('CITY') or '').strip()
+                        state = (row.get('STATE OR PROVINCE') or 'TX').strip()
+                        zipcode = (row.get('ZIP OR POSTAL CODE') or '').strip()
+                        zillow_query = f"{raw_addr} {city} {state} {zipcode}".replace(' ', '-')
+                        comp_lat = float(row.get('LATITUDE') or 0)
+                        comp_lon = float(row.get('LONGITUDE') or 0)
+                        dist = 0
+                        if comp_lat and comp_lon:
+                            dist = ((comp_lat - lat) * 69) ** 2 + ((comp_lon - lon) * 60) ** 2
+                            dist = dist ** 0.5
+                        comps.append({
+                            'address': f"{raw_addr}, {city}",
+                            'price': price, 'sqft': sqft, 'psf': psf,
+                            'year_built': int(float(row.get('YEAR BUILT') or 0)),
+                            'beds': row.get('BEDS') or '',
+                            'baths': row.get('BATHS') or '',
+                            'days_on_market': row.get('DAYS ON MARKET') or '',
                             'redfin_url': redfin_url,
                             'zillow_url': f"https://www.zillow.com/homes/{zillow_query}_rb/",
                             'distance_mi': round(dist, 2),
@@ -581,6 +652,20 @@ def run_analysis(address: str, zip_code: str, street_name: str):
                     "min_psf": min(n_psf),
                     "max_psf": max(n_psf),
                     "count": len(n_psf),
+                }
+
+        # Active listings (1 mile radius)
+        result.active_comps = redfin_api.get_active_listings(lat, lon, radius_miles=1.0)
+        if result.active_comps:
+            a_psf = sorted([c["psf"] for c in result.active_comps if c.get("psf", 0) > 0])
+            if a_psf:
+                mid = len(a_psf) // 2
+                result.active_stats = {
+                    "median_psf": a_psf[mid],
+                    "avg_psf": round(sum(a_psf) / len(a_psf)),
+                    "min_psf": min(a_psf),
+                    "max_psf": max(a_psf),
+                    "count": len(a_psf),
                 }
 
     return result
@@ -1109,8 +1194,8 @@ if submitted and address and zip_code:
     # ══════════════════════════════════════════════
     # TABS
     # ══════════════════════════════════════════════
-    tab_verdict, tab_scenarios, tab_comps, tab_permits, tab_plot, tab_ai, tab_download = st.tabs([
-        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏗️ Permits", "📋 Plot Info", "🤖 AI Analysis", "📄 Download"
+    tab_verdict, tab_scenarios, tab_comps, tab_active, tab_permits, tab_plot, tab_ai, tab_download = st.tabs([
+        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏠 Active Listings", "🏗️ Permits", "📋 Plot Info", "🤖 AI Analysis", "📄 Download"
     ])
 
     # ── Risk Analysis Tab ──
@@ -1338,6 +1423,43 @@ if submitted and address and zip_code:
                          })
         else:
             st.warning("No Redfin comps available. Redfin may be blocking requests from this server.")
+
+    # ── Active Listings Tab ──
+    with tab_active:
+        st.subheader(f"🏠 Active Listings — Within 1 Mile")
+        if result.active_comps:
+            a_stats = result.active_stats
+            if a_stats:
+                ac1, ac2, ac3, ac4 = st.columns(4)
+                ac1.metric("Median $/sf", f"${a_stats.get('median_psf', 0)}")
+                ac2.metric("Average $/sf", f"${a_stats.get('avg_psf', 0)}")
+                ac3.metric("Count", f"{a_stats.get('count', 0)}")
+                ac4.metric("Range", f"${a_stats.get('min_psf', 0)}–${a_stats.get('max_psf', 0)}")
+
+            a_data = []
+            for c in result.active_comps:
+                if c.get("psf", 0) > 0:
+                    a_data.append({
+                        "Address": c["address"],
+                        "List Price": f"${c['price']:,}",
+                        "Size": f"{c['sqft']:,} sf",
+                        "$/sf": c["psf"],
+                        "Distance": f"{c.get('distance_mi', 0):.1f} mi",
+                        "Built": c.get("year_built", ""),
+                        "Beds": c.get("beds", ""),
+                        "Baths": c.get("baths", ""),
+                        "Days on Market": c.get("days_on_market", ""),
+                        "Redfin": c.get("redfin_url", ""),
+                        "Zillow": c.get("zillow_url", ""),
+                    })
+            st.dataframe(a_data, use_container_width=True, hide_index=True,
+                         column_config={
+                             "Redfin": st.column_config.LinkColumn("Redfin", display_text="View"),
+                             "Zillow": st.column_config.LinkColumn("Zillow", display_text="View"),
+                         })
+            st.caption("💡 These are your competition — currently listed homes near the subject property.")
+        else:
+            st.info("No active listings found within 1 mile.")
 
     # ── Permits Tab ──
     with tab_permits:
