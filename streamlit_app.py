@@ -35,14 +35,17 @@ def generate_ai_summary(deal_data: dict) -> str:
     if not api_key:
         return ""
 
-    prompt = f"""You are a real estate investment analyst advising an experienced fix-and-flip investor.
-Analyze this deal objectively — highlight both the upside AND the risks. Be specific with numbers.
-Cover: Is the projected profit realistic? How does the exit price compare to nearby sold prices?
-Comment on competition from permits. Briefly mention rental hold as a backup strategy.
+    prompt = f"""You are a real estate investment analyst. Analyze this deal and give a clear, 
+plain-English summary that a beginner investor can understand. Be specific with numbers.
+Cover: Is it a good deal? What are the risks? How does the exit price compare to nearby sold prices?
+Comment on competition from permits. Mention rental hold as a backup strategy.
 
-IMPORTANT: This is a fix-and-flip deal, NOT a buy-and-hold rental. The primary strategy is to renovate/build and sell at the exit price. Negative monthly cash flow during a short hold period is normal and expected for flips — do NOT treat it as a dealbreaker. Focus on the projected profit margin and whether the exit price is achievable based on comps.
+CRITICAL CONTEXT: This is a fix-and-flip deal. The investor plans to buy, renovate/build, and sell at the exit price. 
+Negative monthly cash flow from renting is NOT a dealbreaker — rentals are only a backup plan, not the primary strategy.
+Focus your verdict on: (1) projected flip profit margin, (2) whether exit price is realistic based on comps, (3) construction/timeline risks.
+If the flip profit margin is healthy (>15%) and the exit price is supported by comps, this is a good deal even if rental cash flow is negative.
 
-The app's automated verdict is: {deal_data.get('verdict', 'N/A')}. Your analysis should be consistent with this verdict. If the profit margin is healthy (>15%) and exit price is supported by comps, recommend the deal even if rental cash flow is negative.
+The app's automated verdict is: {deal_data.get('verdict', 'N/A')}. Your recommendation should be consistent with this verdict.
 
 IMPORTANT FORMATTING RULES: Do NOT use dollar signs ($) for currency. Instead write amounts like "450,000" or "575/sf". Do NOT use LaTeX or math notation. Use plain text only.
 
