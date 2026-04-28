@@ -87,10 +87,13 @@ class Permit:
     floors: int = 0
     status: str = ""
     permit_number: str = ""
+    permit_type: str = ""
+    permit_type_desc: str = ""
 
 @dataclass
 class AnalysisResult:
     street_permits: list = field(default_factory=list)
+    street_all_permits: list = field(default_factory=list)
     zip_permits: list = field(default_factory=list)
     redfin_comps: list = field(default_factory=list)
     neighborhood_comps: list = field(default_factory=list)
@@ -111,6 +114,21 @@ class AustinPermits:
         two_years_ago = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT00:00:00')
         where = f"permit_location like '%{street_name.upper()}%' AND permittype='BP' AND work_class='New' AND original_zip='{zip_code}' AND issue_date >= '{two_years_ago}'"
         params = {"$where": where, "$order": "issue_date DESC", "$limit": 100}
+        for attempt in range(2):
+            try:
+                resp = requests.get(self.BASE_URL, params=params, timeout=20)
+                if resp.status_code != 200:
+                    continue
+                return self._parse_permits(resp.json())
+            except Exception:
+                continue
+        return []
+
+    def search_street_all_types(self, street_name: str, zip_code: str) -> list[Permit]:
+        """Search all permit types (building, electrical, plumbing, mechanical) for a street."""
+        two_years_ago = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%dT00:00:00')
+        where = f"permit_location like '%{street_name.upper()}%' AND original_zip='{zip_code}' AND issue_date >= '{two_years_ago}'"
+        params = {"$where": where, "$order": "issue_date DESC", "$limit": 200}
         for attempt in range(2):
             try:
                 resp = requests.get(self.BASE_URL, params=params, timeout=20)
@@ -160,6 +178,8 @@ class AustinPermits:
                 floors=int(r.get("number_of_floors", 0) or 0),
                 status=r.get("status_current", ""),
                 permit_number=r.get("permit_num", r.get("permitnumber", "")),
+                permit_type=r.get("permittype", ""),
+                permit_type_desc=r.get("permit_type_desc", ""),
             ))
         return permits
 
@@ -571,6 +591,7 @@ def run_analysis(address: str, zip_code: str, street_name: str):
 
     # Permits
     result.street_permits = permits_api.search_street(street_name, zip_code)
+    result.street_all_permits = permits_api.search_street_all_types(street_name, zip_code)
     result.zip_permits = permits_api.search_zip(zip_code)
     result.sources_status['permits'] = '✅' if result.street_permits or result.zip_permits else '⚠'
 
@@ -1574,6 +1595,38 @@ if submitted and address and zip_code:
             st.warning("No new construction permits found. This could mean:\n"
                       "- No recent builds on this street\n"
                       "- The permits API may be temporarily unavailable — try clicking **Analyze** again")
+
+        # All permit types for the street
+        if result.street_all_permits:
+            st.markdown("---")
+            st.subheader(f"📋 All Permits — {street_name} St (past 2 years)")
+
+            # Group by type
+            type_map = {'BP': '🏗️ Building', 'EP': '⚡ Electrical', 'PP': '🔧 Plumbing',
+                        'MP': '🌬️ Mechanical', 'DP': '🚧 Demolition'}
+            by_type = {}
+            for p in result.street_all_permits:
+                key = p.permit_type or 'Other'
+                by_type.setdefault(key, []).append(p)
+
+            # Summary counts
+            type_cols = st.columns(min(len(by_type), 5))
+            for i, (ptype, permits) in enumerate(sorted(by_type.items())):
+                label = type_map.get(ptype, ptype)
+                type_cols[i % len(type_cols)].metric(label, len(permits))
+
+            # Table with all permits
+            all_data = []
+            for p in result.street_all_permits:
+                all_data.append({
+                    "Address": p.address,
+                    "Category": type_map.get(p.permit_type, p.permit_type),
+                    "Work": p.work_class,
+                    "Description": (p.description or "")[:120],
+                    "Status": p.status,
+                    "Date": p.issue_date,
+                })
+            st.dataframe(all_data, use_container_width=True, hide_index=True)
 
     # ── Plot Info Tab ──
     with tab_plot:
