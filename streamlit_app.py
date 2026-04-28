@@ -60,22 +60,28 @@ DEAL DATA:
 Keep your response under 300 words. Use bullet points for key takeaways. 
 End with a clear recommendation."""
 
+    models = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-        resp = requests.post(url, json={
-            "contents": [{"parts": [{"text": prompt}]}]
-        }, timeout=30)
-        if resp.status_code == 200:
-            data = resp.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        elif resp.status_code == 429:
-            return ("⚠️ **Gemini API quota exceeded.** The free tier has a daily limit.\n\n"
-                    "**Options:**\n"
-                    "- Wait until tomorrow (quota resets daily)\n"
-                    "- Create a new API key at [Google AI Studio](https://aistudio.google.com/apikey) "
-                    "and update it in Streamlit Cloud → Settings → Secrets")
-        else:
-            return f"⚠️ AI analysis unavailable (HTTP {resp.status_code}): {resp.text[:200]}"
+        for model_name in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            resp = requests.post(url, json={
+                "contents": [{"parts": [{"text": prompt}]}]
+            }, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            elif resp.status_code == 429:
+                time.sleep(2)
+                continue  # try next model
+            else:
+                return f"⚠️ AI analysis error (HTTP {resp.status_code}): {resp.text[:200]}"
+        # All models hit 429
+        return ("⚠️ **Gemini API quota exceeded.** The free tier has a daily limit.\n\n"
+                "**Options:**\n"
+                "- Reboot the app in Streamlit Cloud (Manage app → Reboot)\n"
+                "- Wait until tomorrow (quota resets daily)\n"
+                "- Create a new API key at [Google AI Studio](https://aistudio.google.com/apikey) "
+                "and update it in Streamlit Cloud → Settings → Secrets")
     except Exception as e:
         return f"⚠️ AI analysis unavailable: {str(e)}"
 
