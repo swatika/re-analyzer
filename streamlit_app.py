@@ -618,8 +618,14 @@ def run_analysis(address: str, zip_code: str, street_name: str):
     result.zip_permits = permits_api.search_zip(zip_code)
     result.sources_status['permits'] = '✅' if result.street_permits or result.zip_permits else '⚠'
 
-    # Redfin — ZIP-wide comps
-    result.redfin_comps = redfin_api.get_sold_comps(zip_code)
+    # Geocode for radius-based queries
+    lat, lon = geocode_address(address, zip_code)
+
+    # Redfin — Sold comps (1 mile radius)
+    if lat and lon:
+        result.redfin_comps = redfin_api.get_neighborhood_comps(lat, lon, radius_miles=1.0)
+    else:
+        result.redfin_comps = redfin_api.get_sold_comps(zip_code)
     if result.redfin_comps:
         psf_values = sorted([c["psf"] for c in result.redfin_comps if c.get("psf", 0) > 0])
         if psf_values:
@@ -638,21 +644,10 @@ def run_analysis(address: str, zip_code: str, street_name: str):
     # Listing status (active/pending/sold)
     result.listing_status = redfin_api.check_listing_status(address, zip_code)
 
-    # Neighborhood comps (1 mile radius)
-    lat, lon = geocode_address(address, zip_code)
+    # Neighborhood comps are now the same as sold comps (both 1 mile)
     if lat and lon:
-        result.neighborhood_comps = redfin_api.get_neighborhood_comps(lat, lon, radius_miles=1.0)
-        if result.neighborhood_comps:
-            n_psf = sorted([c["psf"] for c in result.neighborhood_comps if c.get("psf", 0) > 0])
-            if n_psf:
-                mid = len(n_psf) // 2
-                result.neighborhood_stats = {
-                    "median_psf": n_psf[mid],
-                    "avg_psf": round(sum(n_psf) / len(n_psf)),
-                    "min_psf": min(n_psf),
-                    "max_psf": max(n_psf),
-                    "count": len(n_psf),
-                }
+        result.neighborhood_comps = result.redfin_comps
+        result.neighborhood_stats = result.market_stats
 
         # Active listings (1 mile radius)
         result.active_comps = redfin_api.get_active_listings(lat, lon, radius_miles=1.0)
@@ -1446,37 +1441,6 @@ if submitted and address and zip_code:
 
     # ── Comps Tab ──
     with tab_comps:
-        # Neighborhood comps (1 mile radius)
-        if result.neighborhood_comps:
-            n_stats = result.neighborhood_stats
-            st.subheader(f"📍 Neighborhood Comps — Within 1 Mile ({n_stats.get('count', 0)} sold)")
-            nc1, nc2, nc3, nc4 = st.columns(4)
-            nc1.metric("Median $/sf", f"${n_stats.get('median_psf', 0)}")
-            nc2.metric("Average $/sf", f"${n_stats.get('avg_psf', 0)}")
-            nc3.metric("Count", f"{n_stats.get('count', 0)}")
-            nc4.metric("Range", f"${n_stats.get('min_psf', 0)}–${n_stats.get('max_psf', 0)}")
-
-            n_data = []
-            for c in result.neighborhood_comps:
-                if c.get("psf", 0) > 0:
-                    n_data.append({
-                        "Address": c["address"],
-                        "Price": f"${c['price']:,}",
-                        "Size": f"{c['sqft']:,} sf",
-                        "$/sf": c["psf"],
-                        "Distance": f"{c.get('distance_mi', 0):.1f} mi",
-                        "Built": c.get("year_built", ""),
-                        "Sold": c.get("sold_date", ""),
-                        "Redfin": c.get("redfin_url", ""),
-                        "Zillow": c.get("zillow_url", ""),
-                    })
-            st.dataframe(n_data, use_container_width=True, hide_index=True,
-                         column_config={
-                             "Redfin": st.column_config.LinkColumn("Redfin", display_text="View"),
-                             "Zillow": st.column_config.LinkColumn("Zillow", display_text="View"),
-                         })
-            st.markdown("---")
-
         if result.redfin_comps:
             # Similar-size comps (per unit)
             sim_stats = getattr(result, 'similar_stats', {})
@@ -1510,7 +1474,7 @@ if submitted and address and zip_code:
 
             # All comps
             stats = result.market_stats
-            st.subheader(f"All New Construction — {zip_code} (past 2 years, {stats.get('count', 0)} comps)")
+            st.subheader(f"📍 Sold Comps — Within 1 Mile (past 2 years, {stats.get('count', 0)} comps)")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Median $/sf", f"${stats.get('median_psf', 0)}")
             c2.metric("Average $/sf", f"${stats.get('avg_psf', 0)}")
@@ -1518,13 +1482,14 @@ if submitted and address and zip_code:
             c4.metric("Max $/sf", f"${stats.get('max_psf', 0)}")
 
             comp_data = []
-            for c in sorted(result.redfin_comps, key=lambda x: x.get("psf", 0), reverse=True):
+            for c in sorted(result.redfin_comps, key=lambda x: x.get("distance_mi", 0)):
                 if c.get("psf", 0) > 0:
                     comp_data.append({
                         "Address": c["address"],
                         "Price": f"${c['price']:,}",
                         "Size": f"{c['sqft']:,} sf",
                         "$/sf": c["psf"],
+                        "Distance": f"{c.get('distance_mi', 0):.1f} mi",
                         "Built": c.get("year_built", ""),
                         "Sold": c.get("sold_date", ""),
                         "Beds": c.get("beds", ""),
