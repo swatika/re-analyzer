@@ -775,19 +775,8 @@ def run_analysis(address: str, zip_code: str, street_name: str):
                     "count": len(a_psf),
                 }
 
-        # Rental listings (2 mile radius)
-        result.rental_comps = redfin_api.get_rental_listings(zip_code, lat, lon, radius_miles=2.0)
-        if result.rental_comps:
-            rents = sorted([r["rent"] for r in result.rental_comps if r.get("rent", 0) > 0])
-            if rents:
-                mid = len(rents) // 2
-                result.rental_stats = {
-                    "median_rent": rents[mid],
-                    "avg_rent": round(sum(rents) / len(rents)),
-                    "min_rent": min(rents),
-                    "max_rent": max(rents),
-                    "count": len(rents),
-                }
+        # Rental listings — Redfin CSV doesn't support rentals, so skip
+        # Users can research rentals via the links in the Rental Comps tab
 
     return result
 
@@ -2344,39 +2333,19 @@ if show_analysis and result is not None:
     with tab_rental:
         st.subheader("💰 Rental Market Analysis")
 
-        # ── Active Rental Listings ──
-        st.markdown("### 🏠 Active Rental Listings — Within 2 Miles")
-        if result.rental_comps:
-            r_stats = result.rental_stats
-            if r_stats:
-                rk1, rk2, rk3, rk4 = st.columns(4)
-                rk1.metric("Median Rent", f"${r_stats.get('median_rent', 0):,}/mo")
-                rk2.metric("Average Rent", f"${r_stats.get('avg_rent', 0):,}/mo")
-                rk3.metric("Count", f"{r_stats.get('count', 0)}")
-                rk4.metric("Range", f"${r_stats.get('min_rent', 0):,}–${r_stats.get('max_rent', 0):,}")
+        # ── Research Links (at top for easy access) ──
+        st.markdown("### 🔍 Search Active Rentals Near You")
+        zillow_rental = f"https://www.zillow.com/homes/for_rent/{zip_code}_rb/"
+        apartments_url = f"https://www.apartments.com/{zip_code}/"
+        rentometer_url = f"https://www.rentometer.com/analysis/new?address={zip_code}"
+        redfin_rental = f"https://www.redfin.com/zipcode/{zip_code}/apartments-for-rent"
 
-            rental_data = []
-            for r in result.rental_comps:
-                if r.get("rent", 0) > 0:
-                    rental_data.append({
-                        "Address": r["address"],
-                        "Rent": f"${r['rent']:,}/mo",
-                        "Size": f"{r['sqft']:,} sf" if r.get('sqft') else "—",
-                        "$/SF/mo": f"${r['rent_psf']:.2f}" if r.get('rent_psf') else "—",
-                        "Beds": r.get("beds", ""),
-                        "Baths": r.get("baths", ""),
-                        "Type": r.get("property_type", ""),
-                        "Distance": f"{r.get('distance_mi', 0):.1f} mi",
-                        "Redfin": r.get("redfin_url", ""),
-                    })
-            if rental_data:
-                st.dataframe(rental_data, use_container_width=True, hide_index=True,
-                             column_config={
-                                 "Redfin": st.column_config.LinkColumn("Redfin", display_text="View"),
-                             })
-            st.caption("💡 Active rental listings from Redfin within 2 miles of the subject property.")
-        else:
-            st.info("No active rental listings found on Redfin within 2 miles. Check the research links below for more rental data.")
+        lk1, lk2, lk3, lk4 = st.columns(4)
+        lk1.markdown(f"[🏠 Zillow Rentals]({zillow_rental})")
+        lk2.markdown(f"[🏢 Apartments.com]({apartments_url})")
+        lk3.markdown(f"[📊 Rentometer]({rentometer_url})")
+        lk4.markdown(f"[🔴 Redfin Rentals]({redfin_rental})")
+        st.caption("Click above to search active rental listings in your ZIP code.")
 
         st.markdown("---")
 
@@ -2453,18 +2422,6 @@ if show_analysis and result is not None:
 
         st.dataframe(sensitivity_data, use_container_width=True, hide_index=True)
         st.caption("💡 The **0% (Base)** row matches your assumed rent. Negative CF means you'd need to fund the shortfall from cash reserves.")
-
-        # ── d) Research Links ──
-        st.markdown("### 🔗 Research Links")
-        zillow_rental = f"https://www.zillow.com/homes/for_rent/{zip_code}_rb/"
-        apartments_url = f"https://www.apartments.com/{zip_code}/"
-        rentometer_url = f"https://www.rentometer.com/analysis/new?address={zip_code}"
-
-        lk1, lk2, lk3 = st.columns(3)
-        lk1.markdown(f"[🏠 Zillow Rentals]({zillow_rental})")
-        lk2.markdown(f"[🏢 Apartments.com]({apartments_url})")
-        lk3.markdown(f"[📊 Rentometer]({rentometer_url})")
-        st.caption("Use these links to research actual rental listings and market data in your ZIP code.")
 
     # ── Permits Tab ──
     with tab_permits:
