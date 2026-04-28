@@ -60,7 +60,7 @@ DEAL DATA:
 Keep your response under 300 words. Use bullet points for key takeaways. 
 End with a clear recommendation."""
 
-    models = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash-latest"]
+    models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
     last_error = ""
     try:
         for model_name in models:
