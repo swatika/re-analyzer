@@ -15,6 +15,55 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional
 
+# ── Gemini AI (optional) ──
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
+
+def generate_ai_summary(deal_data: dict) -> str:
+    """Generate a plain-English AI deal analysis using Google Gemini (free tier)."""
+    api_key = st.secrets.get("GEMINI_API_KEY", "")
+    if not api_key or not GEMINI_AVAILABLE:
+        return ""
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+
+    prompt = f"""You are a real estate investment analyst. Analyze this deal and give a clear, 
+plain-English summary that a beginner investor can understand. Be specific with numbers.
+Cover: Is it a good deal? What are the risks? What should they watch out for?
+
+DEAL DATA:
+- Address: {deal_data.get('address', 'N/A')}, ZIP: {deal_data.get('zip_code', 'N/A')}
+- Purchase Price: ${deal_data.get('purchase_price', 0):,.0f}
+- Total Build Size: {deal_data.get('total_sf', 0):,} sq ft ({deal_data.get('num_units', 1)} units, {deal_data.get('per_unit_sf', 0):,.0f} sf/unit)
+- Exit Price/SF: ${deal_data.get('exit_psf', 0)}/sf
+- Total All-In Cost: ${deal_data.get('total_cost', 0):,.0f}
+- Expected Revenue: ${deal_data.get('revenue', 0):,.0f}
+- Projected Profit: ${deal_data.get('profit', 0):,.0f}
+- Profit Margin: {deal_data.get('margin_pct', 0):.1f}%
+- Break-Even PSF: ${deal_data.get('breakeven_psf', 0):.0f}/sf
+- Market Median PSF: ${deal_data.get('median_psf', 0)}/sf (from {deal_data.get('comp_count', 0)} comps)
+- Risk Score: {deal_data.get('risk_score', 0)}/100
+- Verdict: {deal_data.get('verdict', 'N/A')}
+- Listing Status: {deal_data.get('listing_status', 'Unknown')}
+- Zoning: {deal_data.get('zoning', 'N/A')}
+- Monthly Rent: ${deal_data.get('monthly_rent', 0):,.0f}
+- Rental NOI/Year: ${deal_data.get('rental_noi', 0):,.0f}
+
+Keep your response under 300 words. Use bullet points for key takeaways. 
+End with a clear recommendation."""
+
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"⚠️ AI analysis unavailable: {str(e)}"
+
+
 # ── Page Config ──
 st.set_page_config(
     page_title="Austin Deal Analyzer PRO",
@@ -966,8 +1015,8 @@ if submitted and address and zip_code:
     # ══════════════════════════════════════════════
     # TABS
     # ══════════════════════════════════════════════
-    tab_verdict, tab_scenarios, tab_comps, tab_permits, tab_plot, tab_download = st.tabs([
-        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏗️ Permits", "📋 Plot Info", "📄 Download"
+    tab_verdict, tab_scenarios, tab_comps, tab_permits, tab_plot, tab_ai, tab_download = st.tabs([
+        "🚦 Risk Analysis", "📈 Scenarios & Sensitivity", "📊 Sold Comps", "🏗️ Permits", "📋 Plot Info", "🤖 AI Analysis", "📄 Download"
     ])
 
     # ── Risk Analysis Tab ──
@@ -1353,6 +1402,50 @@ if submitted and address and zip_code:
 
         else:
             st.error("Could not geocode address. Please verify the address and ZIP code.")
+
+    # ── AI Analysis Tab ──
+    with tab_ai:
+        st.subheader("🤖 AI Deal Analysis")
+
+        if not GEMINI_AVAILABLE:
+            st.warning("Install `google-generativeai` package to enable AI analysis.")
+        elif not st.secrets.get("GEMINI_API_KEY", ""):
+            st.info("**How to enable free AI analysis:**\n\n"
+                    "1. Go to [Google AI Studio](https://aistudio.google.com/apikey) and get a free API key\n"
+                    "2. In Streamlit Cloud → Settings → Secrets, add:\n"
+                    "```\nGEMINI_API_KEY = \"your-api-key-here\"\n```\n"
+                    "3. Refresh the app — the 🤖 AI Analysis tab will work!\n\n"
+                    "**Cost: FREE** (Google Gemini free tier: 15 requests/minute)")
+        else:
+            if st.button("🧠 Generate AI Analysis", type="primary"):
+                with st.spinner("AI is analyzing your deal..."):
+                    deal_data = {
+                        'address': address,
+                        'zip_code': zip_code,
+                        'purchase_price': purchase_price,
+                        'total_sf': build_sf,
+                        'num_units': num_units,
+                        'per_unit_sf': per_unit_sf,
+                        'exit_psf': exit_psf,
+                        'total_cost': total_cost,
+                        'revenue': adjusted_revenue,
+                        'profit': market_profit,
+                        'margin_pct': (market_profit / total_cost * 100) if total_cost > 0 else 0,
+                        'breakeven_psf': breakeven_psf,
+                        'median_psf': median_psf,
+                        'comp_count': result.market_stats.get('count', 0),
+                        'risk_score': risk_score,
+                        'verdict': verdict,
+                        'listing_status': result.listing_status.get('status', 'Unknown'),
+                        'zoning': 'N/A',
+                        'monthly_rent': rent_per_unit * num_units if 'rent_per_unit' in dir() else 0,
+                        'rental_noi': 0,
+                    }
+                    ai_text = generate_ai_summary(deal_data)
+                    if ai_text:
+                        st.markdown(ai_text)
+                    else:
+                        st.error("Could not generate AI analysis. Check your API key.")
 
     # ── Download Tab ──
     with tab_download:
