@@ -107,7 +107,7 @@ class AustinPermits:
     BASE_URL = "https://data.austintexas.gov/resource/3syk-w9eu.json"
 
     def search_street(self, street_name: str, zip_code: str) -> list[Permit]:
-        where = f"permit_location like '%{street_name.upper()}%' AND permittype='BP' AND work_class='New' AND original_zip='{zip_code}'"
+        where = f"permit_location like '%{street_name.upper()}%' AND permittype='BP' AND work_class='New' AND original_zip='{zip_code}' AND issue_date >= '2024-01-01T00:00:00'"
         params = {"$where": where, "$order": "issue_date DESC", "$limit": 100}
         for attempt in range(2):
             try:
@@ -120,7 +120,7 @@ class AustinPermits:
         return []
 
     def search_zip(self, zip_code: str, limit: int = 200) -> list[Permit]:
-        where = f"original_zip='{zip_code}' AND permittype='BP' AND work_class='New'"
+        where = f"original_zip='{zip_code}' AND permittype='BP' AND work_class='New' AND issue_date >= '2024-01-01T00:00:00'"
         params = {"$where": where, "$order": "issue_date DESC", "$limit": limit}
         for attempt in range(2):
             try:
@@ -200,7 +200,7 @@ class RedfinComps:
             f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=200'
             f'&ord=redfin-recommended-asc&page_number=1'
             f'&region_id={region_id}&region_type=2'
-            f'&sold_within_days=180&status=9&uipt=1&v=8&min_year_built=2020'
+            f'&sold_within_days=730&status=9&uipt=1&v=8&min_year_built=2020'
         )
         try:
             resp = requests.get(url, headers=headers, timeout=20)
@@ -265,7 +265,7 @@ class RedfinComps:
             f'&ord=redfin-recommended-asc&page_number=1'
             f'&lat_min={lat - lat_offset:.6f}&lat_max={lat + lat_offset:.6f}'
             f'&lng_min={lon - lon_offset:.6f}&lng_max={lon + lon_offset:.6f}'
-            f'&sold_within_days=180&status=9&uipt=1&v=8&min_year_built=2020'
+            f'&sold_within_days=730&status=9&uipt=1&v=8&min_year_built=2020'
         )
         try:
             resp = requests.get(url, headers=headers, timeout=20)
@@ -944,15 +944,18 @@ with st.sidebar:
         st.divider()
         st.subheader("💵 Cost Details")
         hard_contingency_pct = st.slider("Hard Cost Contingency (%)", 0, 15, 6)
-        soft_cost_pct = st.slider("Soft Costs (arch/eng/permits) (%)", 0, 20, 10)
+        soft_cost_pct = st.number_input("Soft Costs (arch/eng/permits) (%)", min_value=0.0, max_value=20.0, value=10.4, step=0.5)
         soft_contingency = st.number_input("Soft Contingency ($)", min_value=0, value=20000, step=5000)
 
         st.divider()
         st.subheader("💰 Construction Financing")
-        ltv = st.slider("Loan to Cost (%)", 0, 100, 70)
-        interest_rate = st.slider("Construction Interest Rate (%)", 3.0, 14.0, 8.5, step=0.5)
+        ltv = st.slider("Loan to Cost (%)", 0, 100, 100,
+                        help="% of non-land development cost funded by debt")
+        interest_rate = st.slider("Construction Interest Rate (%)", 3.0, 14.0, 8.0, step=0.5)
         draw_factor = st.slider("Draw Factor (%)", 40, 80, 60,
                                 help="Avg % of loan funded during construction")
+        loan_fee_pct = st.slider("Construction Loan Fees (%)", 0.0, 3.0, 1.0, step=0.25,
+                                 help="Origination / lender fees on construction debt")
 
         st.divider()
         st.subheader("📅 Timeline")
@@ -1021,6 +1024,7 @@ if submitted and address and zip_code:
 
     # Construction interest (draw factor applies during build only)
     construction_interest = loan_amount * (interest_rate / 100) * (draw_factor / 100) * (build_months + delay_months) / 12
+    loan_fees = loan_amount * (loan_fee_pct / 100)
 
     # Holding costs during rental period
     if hold_months > 0:
@@ -1109,16 +1113,45 @@ if submitted and address and zip_code:
     exit_costs_user = user_revenue * (exit_cost_pct / 100)
     exit_costs_market = adjusted_revenue * (exit_cost_pct / 100)
 
-    total_cost = total_project_cost + total_interest + exit_costs_user
-    market_total_cost = total_project_cost + total_interest + exit_costs_market
+    # Profit calculation — Equity/Debt model (matches Excel)
+    if hold_months > 0:
+        # Total equity invested = Land + Construction Interest + Loan Fees + Additional Equity for negative CF
+        cumulative_cf = monthly_cf_after_debt * hold_months
+        additional_equity_needed = max(0, -cumulative_cf)
+        total_equity_invested = purchase_price + construction_interest + loan_fees + additional_equity_needed
 
-    market_profit = adjusted_revenue - market_total_cost + net_rental_income
-    user_profit = user_revenue - total_cost + net_rental_income
+        # At sale: pay off loan balance, keep net proceeds + any positive rental CF
+        net_sale_before_debt = user_revenue - exit_costs_user
+        net_sale_after_debt = net_sale_before_debt - loan_balance_after_hold
+        positive_rental_cf = max(0, cumulative_cf)
+        total_cash_returned = net_sale_after_debt + positive_rental_cf
+
+        user_profit = total_cash_returned - total_equity_invested
+        equity_multiple = total_cash_returned / total_equity_invested if total_equity_invested > 0 else 0
+
+        # Market-based profit
+        net_market_sale = adjusted_revenue - exit_costs_market
+        market_net_after_debt = net_market_sale - loan_balance_after_hold
+        market_cash_returned = market_net_after_debt + positive_rental_cf
+        market_profit = market_cash_returned - total_equity_invested
+    else:
+        # Simple flip model
+        total_cost = total_project_cost + construction_interest + loan_fees + exit_costs_user
+        total_equity_invested = total_cost
+        user_profit = user_revenue - total_cost
+        market_profit = adjusted_revenue - (total_project_cost + construction_interest + loan_fees + exit_costs_market)
+        equity_multiple = user_revenue / total_cost if total_cost > 0 else 0
+        cumulative_cf = 0
+        additional_equity_needed = 0
+        total_cash_returned = user_revenue - exit_costs_user
+
+    total_cost = total_equity_invested  # for break-even calc
+    total_interest = construction_interest + (hold_interest if hold_months > 0 else 0)
 
     annual_rent = rent_per_unit * 12 * units
-    cash_yield = (annual_rent / equity * 100) if equity > 0 else 0
-    annualized_return = ((user_revenue / total_cost) ** (1 / max(timeline_years, 0.5)) - 1) if total_cost > 0 else 0
-    breakeven_psf = (total_cost - net_rental_income) / build_sf if build_sf > 0 else 0
+    cash_yield = (annual_rent / total_equity_invested * 100) if total_equity_invested > 0 else 0
+    annualized_return = ((total_cash_returned / total_equity_invested) ** (1 / max(timeline_years, 0.5)) - 1) if total_equity_invested > 0 else 0
+    breakeven_psf = total_equity_invested / build_sf if build_sf > 0 else 0
 
     # ══════════════════════════════════════════════
     # STEP 3: Risk scoring (0-100, higher = more risk)
@@ -1257,7 +1290,7 @@ if submitted and address and zip_code:
 
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("**Development Costs**")
+            st.markdown("**Development & Financing**")
             st.markdown(f"""
             | Item | Amount |
             |------|--------|
@@ -1266,24 +1299,47 @@ if submitted and address and zip_code:
             | Hard Contingency ({hard_contingency_pct}%) | ${hard_contingency:,.0f} |
             | Soft Costs ({soft_cost_pct}%) | ${soft_costs:,.0f} |
             | Soft Contingency | ${soft_contingency:,.0f} |
-            | Construction Interest | ${construction_interest:,.0f} |
-            | Hold Debt Service ({hold_months} mo) | ${hold_interest:,.0f} |
-            | **Sale Costs ({exit_cost_pct:.1f}%)** | **${exit_costs_user:,.0f}** |
-            | — Broker/Agent ({broker_fee_pct}%) | ${user_revenue * broker_fee_pct / 100:,.0f} |
-            | — Title + Closing ({title_closing_pct}%) | ${user_revenue * title_closing_pct / 100:,.0f} |
-            | — Seller Concessions ({seller_concessions_pct}%) | ${user_revenue * seller_concessions_pct / 100:,.0f} |
-            | **Total All-In** | **${total_cost:,.0f}** |
+            | **Non-Land Dev Cost** | **${total_dev_cost:,.0f}** |
+            | Construction Debt ({ltv}% LTV) | ${loan_amount:,.0f} |
+            | Construction Interest ({interest_rate}%) | ${construction_interest:,.0f} |
+            | Construction Loan Fees ({loan_fee_pct}%) | ${loan_fees:,.0f} |
             """)
 
         with c2:
-            st.markdown("**Returns**")
-            st.markdown(f"""
-            | Scenario | Revenue | Profit |
-            |----------|---------|--------|
-            | Your Exit (${exit_psf}/sf) | ${user_revenue:,.0f} | ${user_profit:,.0f} |
-            | Market Exit (${adjusted_exit:.0f}/sf) | ${adjusted_revenue:,.0f} | ${market_profit:,.0f} |
-            | Break-Even | ${total_cost:,.0f} | $0 |
-            """)
+            if hold_months > 0:
+                st.markdown("**Equity Investment & Returns**")
+                st.markdown(f"""
+                | Item | Amount |
+                |------|--------|
+                | Land Equity | ${purchase_price:,.0f} |
+                | Construction Interest | ${construction_interest:,.0f} |
+                | Loan Fees | ${loan_fees:,.0f} |
+                | Additional Equity (negative CF) | ${additional_equity_needed:,.0f} |
+                | **Total Equity Invested** | **${total_equity_invested:,.0f}** |
+                | | |
+                | Sale Price (${exit_psf}/sf) | ${user_revenue:,.0f} |
+                | Less Sale Costs ({exit_cost_pct:.1f}%) | -${exit_costs_user:,.0f} |
+                | — Broker ({broker_fee_pct}%) | -${user_revenue * broker_fee_pct / 100:,.0f} |
+                | — Title/Closing ({title_closing_pct}%) | -${user_revenue * title_closing_pct / 100:,.0f} |
+                | — Concessions ({seller_concessions_pct}%) | -${user_revenue * seller_concessions_pct / 100:,.0f} |
+                | Less Loan Payoff | -${loan_balance_after_hold:,.0f} |
+                | Plus Positive Rental CF | +${max(0, cumulative_cf):,.0f} |
+                | **Cash Returned** | **${total_cash_returned:,.0f}** |
+                | **Profit** | **${user_profit:,.0f}** |
+                | **Equity Multiple** | **{equity_multiple:.2f}x** |
+                """)
+            else:
+                st.markdown("**Returns (Flip)**")
+                st.markdown(f"""
+                | Scenario | Revenue | Profit |
+                |----------|---------|--------|
+                | Your Exit (${exit_psf}/sf) | ${user_revenue:,.0f} | ${user_profit:,.0f} |
+                | Market Exit (${adjusted_exit:.0f}/sf) | ${adjusted_revenue:,.0f} | ${market_profit:,.0f} |
+                | Sale Costs ({exit_cost_pct:.1f}%) | -${exit_costs_user:,.0f} | |
+                | — Broker ({broker_fee_pct}%) | -${user_revenue * broker_fee_pct / 100:,.0f} | |
+                | — Title/Closing ({title_closing_pct}%) | -${user_revenue * title_closing_pct / 100:,.0f} | |
+                | — Concessions ({seller_concessions_pct}%) | -${user_revenue * seller_concessions_pct / 100:,.0f} | |
+                """)
 
         st.markdown("---")
         st.subheader("Hold Strategy (Rental)")
@@ -1454,7 +1510,7 @@ if submitted and address and zip_code:
 
             # All comps
             stats = result.market_stats
-            st.subheader(f"All New Construction — {zip_code} (past 6 months, {stats.get('count', 0)} comps)")
+            st.subheader(f"All New Construction — {zip_code} (past 2 years, {stats.get('count', 0)} comps)")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Median $/sf", f"${stats.get('median_psf', 0)}")
             c2.metric("Average $/sf", f"${stats.get('avg_psf', 0)}")
@@ -1812,6 +1868,7 @@ elif submitted:
     equity = total_project_cost - loan_amount
     total_build_months = build_months + delay_months
     construction_interest = loan_amount * (interest_rate / 100) * (total_build_months / 12) * (draw_factor / 100)
+    loan_fees = loan_amount * (loan_fee_pct / 100)
 
     hold_interest = 0
     gross_rent = 0
