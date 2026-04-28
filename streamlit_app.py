@@ -1831,46 +1831,48 @@ if submitted and address and zip_code:
     # ── AI Analysis Tab ──
     with tab_ai:
         st.subheader("🤖 AI Deal Analysis")
-
-        if not GEMINI_AVAILABLE:
-            st.warning("Install `google-generativeai` package to enable AI analysis.")
-        elif not _get_gemini_key():
-            st.info("**How to enable free AI analysis:**\n\n"
-                    "1. Go to [Google AI Studio](https://aistudio.google.com/apikey) and get a free API key\n"
-                    "2. In Streamlit Cloud → Settings → Secrets, add:\n"
-                    "```\nGEMINI_API_KEY = \"your-api-key-here\"\n```\n"
-                    "3. Refresh the app — the 🤖 AI Analysis tab will work!\n\n"
-                    "**Cost: FREE** (Google Gemini free tier: 15 requests/minute)")
-        else:
-            if st.button("🧠 Generate AI Analysis", type="primary"):
-                with st.spinner("AI is analyzing your deal..."):
-                    deal_data = {
-                        'address': address,
-                        'zip_code': zip_code,
-                        'purchase_price': purchase_price,
-                        'total_sf': build_sf,
-                        'num_units': units,
-                        'per_unit_sf': per_unit_sf,
-                        'exit_psf': exit_psf,
-                        'total_cost': total_cost,
-                        'revenue': adjusted_revenue,
-                        'profit': market_profit,
-                        'margin_pct': (market_profit / total_cost * 100) if total_cost > 0 else 0,
-                        'breakeven_psf': breakeven_psf,
-                        'median_psf': median_psf,
-                        'comp_count': result.market_stats.get('count', 0),
-                        'risk_score': risk_score,
-                        'verdict': verdict,
-                        'listing_status': result.listing_status.get('status', 'Unknown'),
-                        'zoning': 'N/A',
-                        'monthly_rent': rent_per_unit * units if rent_per_unit else 0,
-                        'rental_noi': 0,
-                    }
-                    ai_text = generate_ai_summary(deal_data)
-                    if ai_text:
-                        st.markdown(ai_text)
-                    else:
-                        st.error("Could not generate AI analysis. Check your API key.")
+        try:
+            if not GEMINI_AVAILABLE:
+                st.warning("Install `google-generativeai` package to enable AI analysis.")
+            elif not _get_gemini_key():
+                st.info("**How to enable free AI analysis:**\n\n"
+                        "1. Go to [Google AI Studio](https://aistudio.google.com/apikey) and get a free API key\n"
+                        "2. In Streamlit Cloud → Settings → Secrets, add:\n"
+                        "```\nGEMINI_API_KEY = \"your-api-key-here\"\n```\n"
+                        "3. Refresh the app — the 🤖 AI Analysis tab will work!\n\n"
+                        "**Cost: FREE** (Google Gemini free tier: 15 requests/minute)")
+            else:
+                if st.button("🧠 Generate AI Analysis", type="primary"):
+                    with st.spinner("AI is analyzing your deal..."):
+                        deal_data = {
+                            'address': address,
+                            'zip_code': zip_code,
+                            'purchase_price': purchase_price,
+                            'total_sf': build_sf,
+                            'num_units': units,
+                            'per_unit_sf': per_unit_sf,
+                            'exit_psf': exit_psf,
+                            'total_cost': total_cost,
+                            'revenue': adjusted_revenue,
+                            'profit': market_profit,
+                            'margin_pct': (market_profit / total_cost * 100) if total_cost > 0 else 0,
+                            'breakeven_psf': breakeven_psf,
+                            'median_psf': median_psf,
+                            'comp_count': result.market_stats.get('count', 0),
+                            'risk_score': risk_score,
+                            'verdict': verdict,
+                            'listing_status': result.listing_status.get('status', 'Unknown') if hasattr(result, 'listing_status') else 'Unknown',
+                            'zoning': 'N/A',
+                            'monthly_rent': rent_per_unit * units,
+                            'rental_noi': 0,
+                        }
+                        ai_text = generate_ai_summary(deal_data)
+                        if ai_text:
+                            st.markdown(ai_text)
+                        else:
+                            st.error("Could not generate AI analysis. Check your API key.")
+        except Exception as e:
+            st.error(f"AI Analysis error: {e}")
 
     # ── Download Tab ──
     with tab_download:
