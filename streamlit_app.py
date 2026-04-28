@@ -1032,9 +1032,13 @@ with st.sidebar:
 
 
 # ── Main Content ──
+show_analysis = submitted and address and zip_code
+result = None
+
 if submitted and address and zip_code:
     st.session_state['address'] = address
     st.session_state['zip_code'] = zip_code
+    st.session_state['analysis_done'] = True
     street_name = extract_street_name(address)
 
     # ══════════════════════════════════════════════
@@ -1042,6 +1046,14 @@ if submitted and address and zip_code:
     # ══════════════════════════════════════════════
     with st.spinner(f"Pulling real market data for {address}, {zip_code}..."):
         result = run_analysis(address, zip_code, street_name)
+    st.session_state['result'] = result
+elif st.session_state.get('analysis_done') and not submitted:
+    # Rerun triggered by button click (e.g. AI Analysis) — restore cached result
+    show_analysis = True
+    result = st.session_state.get('result')
+    street_name = extract_street_name(address)
+
+if show_analysis and result is not None:
 
     # ══════════════════════════════════════════════
     # STEP 2: Financial calculations
@@ -1903,7 +1915,7 @@ if submitted and address and zip_code:
           - No major delays beyond {delay_months} months
         """)
 
-elif submitted:
+elif submitted and not show_analysis:
     # No address/ZIP — run financial-only mode
     st.info("💡 No address entered — showing financial analysis only. Add address + ZIP for market data, comps, and permits.")
 
@@ -2050,7 +2062,7 @@ elif submitted:
         exit_c = rev * (exit_cost_pct / 100)
         profits_by_exit.append(rev - (total_project_cost + total_interest + exit_c) + net_rental_income)
     st.line_chart({"Exit $/sf": exit_range, "Profit": profits_by_exit}, x="Exit $/sf", y="Profit")
-else:
+elif not show_analysis:
     # Landing page
     st.markdown("""
     ### 🏡 How It Works
