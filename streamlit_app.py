@@ -2513,10 +2513,11 @@ if show_analysis and result is not None:
             )
 
             # Excel download
-            _nsbd = net_sale_before_debt if hold_months > 0 else (user_revenue - exit_costs_user)
-            _prcf = positive_rental_cf if hold_months > 0 else 0
-            _nsad = net_sale_after_debt if hold_months > 0 else (user_revenue - exit_costs_user - loan_balance_after_hold)
-            excel_bytes = generate_excel_bytes(
+            try:
+                _nsbd = net_sale_before_debt if hold_months > 0 else (user_revenue - exit_costs_user)
+                _prcf = positive_rental_cf if hold_months > 0 else 0
+                _nsad = net_sale_after_debt if hold_months > 0 else (user_revenue - exit_costs_user - loan_balance_after_hold)
+                excel_bytes = generate_excel_bytes(
                 units=units, per_unit_sf=per_unit_sf, build_sf=build_sf,
                 purchase_price=purchase_price, build_cost_psf=build_cost_psf, exit_psf=exit_psf,
                 build_months=build_months, hold_months=hold_months, delay_months=delay_months,
@@ -2559,14 +2560,17 @@ if show_analysis and result is not None:
                 repairs=repairs, misc=misc, leasing=leasing,
                 monthly_noi=monthly_noi, monthly_cf_after_debt=monthly_cf_after_debt,
             )
-            st.download_button(
-                label="📥 Download Excel Model (.xlsx)",
-                data=excel_bytes,
-                file_name=f"{street_name.title()}_Hold_Model.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                key="dl_excel",
-            )
+                st.download_button(
+                    label="📥 Download Excel Model (.xlsx)",
+                    data=excel_bytes,
+                    file_name=f"{street_name.title()}_Hold_Model.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="dl_excel",
+                )
+                st.caption("Contains 2 sheets: **Hold Model** + **Detailed Analysis**")
+            except Exception as e:
+                st.error(f"Excel generation error: {e}")
         else:
             st.warning("No data to generate report.")
 
