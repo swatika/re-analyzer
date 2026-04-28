@@ -16,12 +16,8 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import Optional
 
-# ── Gemini AI (optional) ──
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
+# ── Gemini AI (optional, uses REST API — no extra package needed) ──
+GEMINI_AVAILABLE = True  # Always available since we use REST API
 
 
 def _get_gemini_key():
@@ -32,13 +28,10 @@ def _get_gemini_key():
 
 
 def generate_ai_summary(deal_data: dict) -> str:
-    """Generate a plain-English AI deal analysis using Google Gemini (free tier)."""
+    """Generate a plain-English AI deal analysis using Google Gemini REST API (no SDK needed)."""
     api_key = _get_gemini_key()
-    if not api_key or not GEMINI_AVAILABLE:
+    if not api_key:
         return ""
-
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
 
     prompt = f"""You are a real estate investment analyst. Analyze this deal and give a clear, 
 plain-English summary that a beginner investor can understand. Be specific with numbers.
@@ -66,8 +59,15 @@ Keep your response under 300 words. Use bullet points for key takeaways.
 End with a clear recommendation."""
 
     try:
-        response = model.generate_content(prompt)
-        return response.text
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        resp = requests.post(url, json={
+            "contents": [{"parts": [{"text": prompt}]}]
+        }, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return f"⚠️ AI analysis unavailable (HTTP {resp.status_code}): {resp.text[:200]}"
     except Exception as e:
         return f"⚠️ AI analysis unavailable: {str(e)}"
 
@@ -1832,9 +1832,7 @@ if submitted and address and zip_code:
     with tab_ai:
         st.subheader("🤖 AI Deal Analysis")
         try:
-            if not GEMINI_AVAILABLE:
-                st.warning("Install `google-generativeai` package to enable AI analysis.")
-            elif not _get_gemini_key():
+            if not _get_gemini_key():
                 st.info("**How to enable free AI analysis:**\n\n"
                         "1. Go to [Google AI Studio](https://aistudio.google.com/apikey) and get a free API key\n"
                         "2. In Streamlit Cloud → Settings → Secrets, add:\n"
