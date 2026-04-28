@@ -638,10 +638,12 @@ def run_analysis(address: str, zip_code: str, street_name: str):
     lat, lon = geocode_address(address, zip_code)
 
     # Redfin — Sold comps (try 1 mile radius first, fallback to ZIP-wide)
+    comps_radius = True
     if lat and lon:
         result.redfin_comps = redfin_api.get_neighborhood_comps(lat, lon, radius_miles=1.0)
     if not result.redfin_comps:
         result.redfin_comps = redfin_api.get_sold_comps(zip_code)
+        comps_radius = False
     if result.redfin_comps:
         psf_values = sorted([c["psf"] for c in result.redfin_comps if c.get("psf", 0) > 0])
         if psf_values:
@@ -654,6 +656,7 @@ def run_analysis(address: str, zip_code: str, street_name: str):
                 "count": len(psf_values),
             }
         result.sources_status['redfin'] = '✅'
+        result.sources_status['comps_radius'] = comps_radius
     else:
         result.sources_status['redfin'] = '⚠ No data'
 
@@ -1490,7 +1493,11 @@ if submitted and address and zip_code:
 
             # All comps
             stats = result.market_stats
-            st.subheader(f"📍 Sold Comps — Within 1 Mile (past 2 years, {stats.get('count', 0)} comps)")
+            if not result.sources_status.get('comps_radius', True):
+                st.warning("⚠️ Could not pull comps within 1 mile — showing ZIP-wide data as fallback.")
+                st.subheader(f"📍 Sold Comps — ZIP {zip_code} (past 2 years, {stats.get('count', 0)} comps)")
+            else:
+                st.subheader(f"📍 Sold Comps — Within 1 Mile (past 2 years, {stats.get('count', 0)} comps)")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Median $/sf", f"${stats.get('median_psf', 0)}")
             c2.metric("Average $/sf", f"${stats.get('avg_psf', 0)}")
