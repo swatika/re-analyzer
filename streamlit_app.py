@@ -40,6 +40,8 @@ plain-English summary that a beginner investor can understand. Be specific with 
 Cover: Is it a good deal? What are the risks? How does the rental income look?
 Compare their exit price to actual nearby sold prices. Comment on competition from permits.
 
+IMPORTANT FORMATTING RULES: Do NOT use dollar signs ($) for currency. Instead write amounts like "450,000" or "575/sf". Do NOT use LaTeX or math notation. Use plain text only.
+
 DEAL DATA:
 - Address: {deal_data.get('address', 'N/A')}, ZIP: {deal_data.get('zip_code', 'N/A')}
 - Purchase Price: ${deal_data.get('purchase_price', 0):,.0f}
@@ -2785,6 +2787,8 @@ if show_analysis and result is not None:
                         }
                         ai_text = generate_ai_summary(deal_data)
                         if ai_text:
+                            # Escape $ signs so Streamlit doesn't render as LaTeX math
+                            ai_text = ai_text.replace('$', '\\$')
                             st.markdown(ai_text)
                         else:
                             st.error("Could not generate AI analysis. Check your API key.")
