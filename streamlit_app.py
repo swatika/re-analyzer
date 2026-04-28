@@ -648,7 +648,9 @@ def run_analysis(address: str, zip_code: str, street_name: str):
 
 def extract_street_name(address: str) -> str:
     parts = address.upper().replace(",", "").split()
-    suffixes = {"ST", "AVE", "DR", "LN", "BLVD", "CT", "WAY", "RD", "CIR", "PL"}
+    suffixes = {"ST", "STREET", "AVE", "AVENUE", "DR", "DRIVE", "LN", "LANE",
+                "BLVD", "BOULEVARD", "CT", "COURT", "WAY", "RD", "ROAD",
+                "CIR", "CIRCLE", "PL", "PLACE", "TRL", "TRAIL", "PKWY", "PARKWAY"}
     street_parts = [p for p in parts[1:] if p not in suffixes]
     return " ".join(street_parts) if street_parts else (parts[1] if len(parts) > 1 else parts[0])
 
