@@ -24,9 +24,16 @@ except ImportError:
     GEMINI_AVAILABLE = False
 
 
+def _get_gemini_key():
+    try:
+        return st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        return ""
+
+
 def generate_ai_summary(deal_data: dict) -> str:
     """Generate a plain-English AI deal analysis using Google Gemini (free tier)."""
-    api_key = st.secrets.get("GEMINI_API_KEY", "")
+    api_key = _get_gemini_key()
     if not api_key or not GEMINI_AVAILABLE:
         return ""
 
@@ -1827,7 +1834,7 @@ if submitted and address and zip_code:
 
         if not GEMINI_AVAILABLE:
             st.warning("Install `google-generativeai` package to enable AI analysis.")
-        elif not st.secrets.get("GEMINI_API_KEY", ""):
+        elif not _get_gemini_key():
             st.info("**How to enable free AI analysis:**\n\n"
                     "1. Go to [Google AI Studio](https://aistudio.google.com/apikey) and get a free API key\n"
                     "2. In Streamlit Cloud → Settings → Secrets, add:\n"
@@ -1842,7 +1849,7 @@ if submitted and address and zip_code:
                         'zip_code': zip_code,
                         'purchase_price': purchase_price,
                         'total_sf': build_sf,
-                        'num_units': num_units,
+                        'num_units': units,
                         'per_unit_sf': per_unit_sf,
                         'exit_psf': exit_psf,
                         'total_cost': total_cost,
@@ -1856,7 +1863,7 @@ if submitted and address and zip_code:
                         'verdict': verdict,
                         'listing_status': result.listing_status.get('status', 'Unknown'),
                         'zoning': 'N/A',
-                        'monthly_rent': rent_per_unit * num_units if 'rent_per_unit' in dir() else 0,
+                        'monthly_rent': rent_per_unit * units if rent_per_unit else 0,
                         'rental_noi': 0,
                     }
                     ai_text = generate_ai_summary(deal_data)
