@@ -336,10 +336,11 @@ class RedfinComps:
                 continue
         return []
 
-    def get_active_listings(self, lat: float, lon: float, radius_miles: float = 1.0) -> list[dict]:
-        """Get currently active (for sale) listings within a radius."""
-        lat_offset = radius_miles / 69.0
-        lon_offset = radius_miles / 60.0
+    def get_active_listings(self, zip_code: str, lat: float = 0, lon: float = 0, radius_miles: float = 1.0) -> list[dict]:
+        """Get currently active (for sale) listings in ZIP, filtered by distance if lat/lon provided."""
+        region_id = self._get_region_id(zip_code)
+        if not region_id:
+            return []
         user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
@@ -347,8 +348,7 @@ class RedfinComps:
         url = (
             f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=200'
             f'&ord=redfin-recommended-asc&page_number=1'
-            f'&lat_min={lat - lat_offset:.6f}&lat_max={lat + lat_offset:.6f}'
-            f'&lng_min={lon - lon_offset:.6f}&lng_max={lon + lon_offset:.6f}'
+            f'&region_id={region_id}&region_type=2'
             f'&status=1&uipt=1&v=8'
         )
         for ua in user_agents:
@@ -405,6 +405,9 @@ class RedfinComps:
                             })
                     except (ValueError, ZeroDivisionError):
                         continue
+                # Filter to within radius if lat/lon provided
+                if lat and lon:
+                    comps = [c for c in comps if c.get('distance_mi', 99) <= radius_miles]
                 return sorted(comps, key=lambda x: x.get('distance_mi', 99))
             except Exception:
                 time.sleep(2)
@@ -671,7 +674,7 @@ def run_analysis(address: str, zip_code: str, street_name: str):
         result.neighborhood_stats = result.market_stats
 
         # Active listings (1 mile radius)
-        result.active_comps = redfin_api.get_active_listings(lat, lon, radius_miles=1.0)
+        result.active_comps = redfin_api.get_active_listings(zip_code, lat, lon, radius_miles=1.0)
         if result.active_comps:
             a_psf = sorted([c["psf"] for c in result.active_comps if c.get("psf", 0) > 0])
             if a_psf:
