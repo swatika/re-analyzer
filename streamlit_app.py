@@ -105,27 +105,31 @@ class AustinPermits:
     def search_street(self, street_name: str, zip_code: str) -> list[Permit]:
         where = f"permit_location like '%{street_name.upper()}%' AND permittype='BP' AND work_class='New' AND original_zip='{zip_code}'"
         params = {"$where": where, "$order": "issue_date DESC", "$limit": 100}
-        try:
-            resp = requests.get(self.BASE_URL, params=params, timeout=15)
-            if resp.status_code != 200:
-                return []
-            return self._parse_permits(resp.json())
-        except Exception:
-            return []
+        for attempt in range(2):
+            try:
+                resp = requests.get(self.BASE_URL, params=params, timeout=20)
+                if resp.status_code != 200:
+                    continue
+                return self._parse_permits(resp.json())
+            except Exception:
+                continue
+        return []
 
     def search_zip(self, zip_code: str, limit: int = 200) -> list[Permit]:
         where = f"original_zip='{zip_code}' AND permittype='BP' AND work_class='New'"
         params = {"$where": where, "$order": "issue_date DESC", "$limit": limit}
-        try:
-            resp = requests.get(self.BASE_URL, params=params, timeout=15)
-            if resp.status_code != 200:
-                return []
-            permits = self._parse_permits(resp.json())
-            return [p for p in permits if 'Single Family' in p.permit_class
-                    or 'Two Family' in p.permit_class
-                    or 'Secondary' in p.permit_class]
-        except Exception:
-            return []
+        for attempt in range(2):
+            try:
+                resp = requests.get(self.BASE_URL, params=params, timeout=20)
+                if resp.status_code != 200:
+                    continue
+                permits = self._parse_permits(resp.json())
+                return [p for p in permits if 'Single Family' in p.permit_class
+                        or 'Two Family' in p.permit_class
+                        or 'Secondary' in p.permit_class]
+            except Exception:
+                continue
+        return []
 
     def _parse_permits(self, data: list) -> list[Permit]:
         permits = []
@@ -1253,7 +1257,9 @@ if submitted and address and zip_code:
                                   "Avg SF": f"{total_sf / len(permits):,.0f}" if permits else "0"})
             st.dataframe(year_data, use_container_width=True, hide_index=True)
         else:
-            st.info("No new construction permits found.")
+            st.warning("No new construction permits found. This could mean:\n"
+                      "- No recent builds on this street\n"
+                      "- The permits API may be temporarily unavailable — try clicking **Analyze** again")
 
     # ── Plot Info Tab ──
     with tab_plot:
