@@ -83,6 +83,9 @@ class Permit:
     permit_class: str = ""
     work_class: str = ""
     builder: str = ""
+    contractor_name: str = ""
+    applicant_name: str = ""
+    applicant_org: str = ""
     housing_units: int = 0
     floors: int = 0
     status: str = ""
@@ -174,6 +177,9 @@ class AustinPermits:
                 permit_class=r.get("permit_class", ""),
                 work_class=r.get("work_class", ""),
                 builder=r.get("contractor_company_name", "Unknown"),
+                contractor_name=r.get("contractor_full_name", ""),
+                applicant_name=r.get("applicant_full_name", ""),
+                applicant_org=r.get("applicant_org", ""),
                 housing_units=int(r.get("housing_units", 0) or 0),
                 floors=int(r.get("number_of_floors", 0) or 0),
                 status=r.get("status_current", ""),
@@ -1565,7 +1571,9 @@ if submitted and address and zip_code:
             if active:
                 st.markdown(f"### 🟡 Under Construction ({len(active)})")
                 st.dataframe([{"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
-                              "Builder": p.builder, "Date": p.issue_date,
+                              "Builder": p.builder, "Contractor": p.contractor_name,
+                              "Applicant": p.applicant_name or p.applicant_org,
+                              "Date": p.issue_date,
                               "Type": p.permit_class,
                               "Source": f"https://data.austintexas.gov/resource/3syk-w9eu.json?permit_num={p.permit_number}" if p.permit_number else ""} for p in active],
                              use_container_width=True, hide_index=True,
@@ -1573,7 +1581,9 @@ if submitted and address and zip_code:
             if final:
                 st.markdown(f"### ✅ Completed ({len(final)})")
                 st.dataframe([{"Address": p.address, "Size": f"{p.sqft:,.0f} sf",
-                              "Builder": p.builder, "Date": p.issue_date,
+                              "Builder": p.builder, "Contractor": p.contractor_name,
+                              "Applicant": p.applicant_name or p.applicant_org,
+                              "Date": p.issue_date,
                               "Type": p.permit_class,
                               "Source": f"https://data.austintexas.gov/resource/3syk-w9eu.json?permit_num={p.permit_number}" if p.permit_number else ""} for p in final],
                              use_container_width=True, hide_index=True,
@@ -1624,6 +1634,8 @@ if submitted and address and zip_code:
                     "Category": type_map.get(p.permit_type, p.permit_type),
                     "Work": p.work_class,
                     "Description": (p.description or "")[:120],
+                    "Submitted By": p.applicant_name or p.applicant_org or "",
+                    "Contractor": p.builder if p.builder != "Unknown" else (p.contractor_name or ""),
                     "Status": p.status,
                     "Date": p.issue_date,
                 })
