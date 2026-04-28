@@ -36,16 +36,33 @@ def generate_ai_summary(deal_data: dict) -> str:
         return ""
 
     prompt = f"""You are a real estate investment analyst. Analyze this deal and give a clear, 
-plain-English summary that a beginner investor can understand. Be specific with numbers.
-Cover: Is it a good deal? What are the risks? How does the exit price compare to nearby sold prices?
-Comment on competition from permits. Mention rental hold as a backup strategy.
+plain-English summary that a beginner investor (first-time flipper) can understand. Be specific with numbers.
 
-CRITICAL CONTEXT: This is a fix-and-flip deal. The investor plans to buy, renovate/build, and sell at the exit price. 
-Negative monthly cash flow from renting is NOT a dealbreaker — rentals are only a backup plan, not the primary strategy.
-Focus your verdict on: (1) projected flip profit margin, (2) whether exit price is realistic based on comps, (3) construction/timeline risks.
-If the flip profit margin is healthy (>15%) and the exit price is supported by comps, this is a good deal even if rental cash flow is negative.
+You MUST answer ALL of these questions clearly with specific numbers:
 
-The app's automated verdict is: {deal_data.get('verdict', 'N/A')}. Your recommendation should be consistent with this verdict.
+## 1. SHOULD I BUY THIS DEAL?
+Give a clear YES or NO with reasoning. Consider the profit margin, exit price vs comps, and risks.
+
+## 2. FLIP OR HOLD — WHICH STRATEGY IS BETTER?
+- **Flip (sell immediately after build):** What's the projected profit? Is the exit price realistic?
+- **Hold & Rent:** What monthly rent should I charge? How long should I hold before selling? What's the cash flow?
+- **Recommend one strategy** and explain why.
+
+## 3. WHAT PRICE SHOULD I TARGET FOR RENTING?
+- Based on Census median rents and the property size, suggest a specific monthly rent per unit.
+- Census median rent for ZIP {deal_data.get('zip_code', 'N/A')}: {deal_data.get('census_median_rent', 'N/A')}/mo
+- Census rent by bedrooms: {deal_data.get('census_rent_by_br', 'N/A')}
+- How long to hold if renting? Give a specific timeframe (e.g., 2 years, 5 years).
+
+## 4. WHAT SHOULD MY MAXIMUM PURCHASE PRICE BE?
+- Based on the comps and desired profit margin (20%+), what is the max I should pay for this land/property?
+- Show the math: Max Purchase = Exit Revenue - Build Costs - Desired Profit
+
+## 5. WHAT EXIT PRICE PER SQUARE FOOT IS REALISTIC?
+- Based on nearby sold comps, what $/sf should I realistically expect?
+- Is the current exit assumption of {deal_data.get('exit_psf', 0)}/sf achievable?
+
+CRITICAL CONTEXT: This is a fix-and-flip deal. Negative monthly rental cash flow is normal for flips — rentals are a backup plan, not the primary strategy. Focus on flip profit first.
 
 IMPORTANT FORMATTING RULES: Do NOT use dollar signs ($) for currency. Instead write amounts like "450,000" or "575/sf". Do NOT use LaTeX or math notation. Use plain text only.
 
@@ -88,8 +105,9 @@ FINANCING:
 - Build Cost: ${deal_data.get('build_cost_psf', 0)}/sf
 - Build Timeline: {deal_data.get('build_months', 0)} months
 
-Keep your response under 500 words. Use bullet points for key takeaways. 
-End with a clear recommendation that aligns with the app's verdict of {deal_data.get('verdict', 'N/A')}."""
+Keep your response under 800 words. Use headers (##) for each section. Use bullet points for clarity.
+End with a FINAL VERDICT: BUY or DON'T BUY, and your recommended strategy (Flip or Hold).
+The app's automated verdict is: {deal_data.get('verdict', 'N/A')}. Your recommendation should be consistent with this."""
 
     models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
     last_error = ""
@@ -2821,6 +2839,15 @@ if show_analysis and result is not None:
                             for c in sorted(result.redfin_comps, key=lambda x: x.get('distance_mi', 0))[:5]:
                                 top_comps_text += f"  - {c['address']}: ${c['price']:,} ({c['sqft']:,}sf, ${c['psf']}/sf, sold {c.get('sold_date', 'N/A')}, {c.get('distance_mi', 0):.1f}mi away)\n"
 
+                        # Fetch Census rents for AI
+                        _census_ai = fetch_census_rents(zip_code)
+                        _census_median = f"${_census_ai.get('median_rent', 0):,}" if _census_ai and _census_ai.get('median_rent') else 'N/A'
+                        _census_by_br = ', '.join([
+                            f"{br}: ${_census_ai.get(k, 0):,}/mo"
+                            for br, k in [('Studio', 'rent_0br'), ('1BR', 'rent_1br'), ('2BR', 'rent_2br'), ('3BR', 'rent_3br'), ('4BR+', 'rent_4br_plus')]
+                            if _census_ai and _census_ai.get(k)
+                        ]) if _census_ai else 'N/A'
+
                         deal_data = {
                             'address': address,
                             'zip_code': zip_code,
@@ -2862,6 +2889,9 @@ if show_analysis and result is not None:
                             'construction_interest': construction_interest,
                             'loan_amount': loan_amount,
                             'build_cost_psf': build_cost_psf,
+                            # Census rental data
+                            'census_median_rent': _census_median,
+                            'census_rent_by_br': _census_by_br,
                         }
                         ai_text = generate_ai_summary(deal_data)
                         if ai_text:
