@@ -944,9 +944,11 @@ with st.sidebar:
 
     with st.form("deal_form"):
         st.subheader("🏠 Property")
-        address = st.text_input("Property Address", placeholder="e.g., 2613 Nottingham Ln",
+        address = st.text_input("Property Address", value=st.session_state.get('address', ''),
+                               placeholder="e.g., 2613 Nottingham Ln",
                                help="Street address of the property you're analyzing")
-        zip_code = st.text_input("ZIP Code", placeholder="e.g., 78704",
+        zip_code = st.text_input("ZIP Code", value=st.session_state.get('zip_code', ''),
+                                 placeholder="e.g., 78704",
                                  help="Used to pull comps, permits, and zoning data")
 
         st.divider()
@@ -1036,6 +1038,8 @@ with st.sidebar:
 
 # ── Main Content ──
 if submitted and address and zip_code:
+    st.session_state['address'] = address
+    st.session_state['zip_code'] = zip_code
     street_name = extract_street_name(address)
 
     # ══════════════════════════════════════════════
