@@ -35,10 +35,14 @@ def generate_ai_summary(deal_data: dict) -> str:
     if not api_key:
         return ""
 
-    prompt = f"""You are a real estate investment analyst. Analyze this deal and give a clear, 
-plain-English summary that a beginner investor can understand. Be specific with numbers.
-Cover: Is it a good deal? What are the risks? How does the rental income look?
-Compare their exit price to actual nearby sold prices. Comment on competition from permits.
+    prompt = f"""You are a real estate investment analyst advising an experienced fix-and-flip investor.
+Analyze this deal objectively — highlight both the upside AND the risks. Be specific with numbers.
+Cover: Is the projected profit realistic? How does the exit price compare to nearby sold prices?
+Comment on competition from permits. Briefly mention rental hold as a backup strategy.
+
+IMPORTANT: This is a fix-and-flip deal, NOT a buy-and-hold rental. The primary strategy is to renovate/build and sell at the exit price. Negative monthly cash flow during a short hold period is normal and expected for flips — do NOT treat it as a dealbreaker. Focus on the projected profit margin and whether the exit price is achievable based on comps.
+
+The app's automated verdict is: {deal_data.get('verdict', 'N/A')}. Your analysis should be consistent with this verdict. If the profit margin is healthy (>15%) and exit price is supported by comps, recommend the deal even if rental cash flow is negative.
 
 IMPORTANT FORMATTING RULES: Do NOT use dollar signs ($) for currency. Instead write amounts like "450,000" or "575/sf". Do NOT use LaTeX or math notation. Use plain text only.
 
@@ -82,7 +86,7 @@ FINANCING:
 - Build Timeline: {deal_data.get('build_months', 0)} months
 
 Keep your response under 500 words. Use bullet points for key takeaways. 
-End with a clear recommendation."""
+End with a clear recommendation that aligns with the app's verdict of {deal_data.get('verdict', 'N/A')}."""
 
     models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
     last_error = ""
