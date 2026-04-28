@@ -911,6 +911,41 @@ OVERLAY_EXPLANATIONS = {
 
 
 @st.cache_data(ttl=3600)
+def fetch_census_rents(zip_code: str) -> dict:
+    """Fetch median rent data from Census Bureau ACS 5-year survey (no API key needed)."""
+    try:
+        # B25064_001E = Median gross rent
+        # B25031_002E-006E = Median rent by bedrooms (0BR, 1BR, 2BR, 3BR, 4BR+)
+        url = 'https://api.census.gov/data/2022/acs/acs5'
+        params = {
+            'get': 'B25064_001E,B25031_002E,B25031_003E,B25031_004E,B25031_005E,B25031_006E',
+            'for': f'zip code tabulation area:{zip_code}'
+        }
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code != 200:
+            return {}
+        data = resp.json()
+        if len(data) < 2:
+            return {}
+        values = data[1]
+        def _int(v):
+            try:
+                return int(v) if v and int(v) > 0 else None
+            except (ValueError, TypeError):
+                return None
+        return {
+            'median_rent': _int(values[0]),
+            'rent_0br': _int(values[1]),
+            'rent_1br': _int(values[2]),
+            'rent_2br': _int(values[3]),
+            'rent_3br': _int(values[4]),
+            'rent_4br_plus': _int(values[5]),
+            'source': 'Census ACS 5-Year (2022)',
+        }
+    except Exception:
+        return {}
+
+
 def geocode_address(address: str, zip_code: str):
     """Geocode address using Census Bureau geocoder, fallback to Nominatim."""
     # Try Census geocoder first
@@ -2349,6 +2384,34 @@ if show_analysis and result is not None:
 
         st.markdown("---")
 
+        # ── Census Bureau Rental Data ──
+        census_rents = fetch_census_rents(zip_code)
+        if census_rents and census_rents.get('median_rent'):
+            st.markdown(f"### 📊 Actual Median Rents — ZIP {zip_code}")
+            st.caption(f"Source: {census_rents.get('source', 'Census ACS')}")
+
+            cr1, cr2, cr3 = st.columns(3)
+            cr1.metric("Overall Median Rent", f"${census_rents['median_rent']:,}/mo")
+            beds_in_unit = max(1, int(build_sf / max(units, 1) / 500))  # rough estimate
+            cr2.metric("Your Unit Size (~" + str(beds_in_unit) + "BR)", 
+                       f"${census_rents.get(f'rent_{beds_in_unit}br', census_rents['median_rent']) or census_rents['median_rent']:,}/mo")
+            cr3.metric("Your Assumption", f"${rent_per_unit:,}/mo",
+                       delta=f"{((rent_per_unit / census_rents['median_rent']) - 1) * 100:+.0f}% vs median" if census_rents['median_rent'] else None)
+
+            # Bedroom breakdown table
+            bed_data = []
+            for label, key in [("Studio", "rent_0br"), ("1 Bedroom", "rent_1br"), ("2 Bedroom", "rent_2br"), 
+                               ("3 Bedroom", "rent_3br"), ("4+ Bedroom", "rent_4br_plus")]:
+                val = census_rents.get(key)
+                if val:
+                    bed_data.append({"Type": label, "Median Rent": f"${val:,}/mo", 
+                                    "Annual": f"${val * 12:,}",
+                                    "vs Your Assumption": f"{((rent_per_unit / val) - 1) * 100:+.1f}%"})
+            if bed_data:
+                st.dataframe(bed_data, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+
         # ── a) Your Rent Assumptions ──
         gross_monthly_rent = rent_per_unit * units
         gross_annual_rent = gross_monthly_rent * 12
@@ -2382,10 +2445,15 @@ if show_analysis and result is not None:
 
         comparison_data = [
             {"Method": "Your Assumption", "Monthly Rent": f"${gross_monthly_rent:,.0f}", "Annual": f"${gross_annual_rent:,.0f}", "$/SF/mo": f"${rent_per_sf:.2f}"},
+        ]
+        if census_rents and census_rents.get('median_rent'):
+            cm = census_rents['median_rent'] * units
+            comparison_data.append({"Method": f"Census Median (×{units} units)", "Monthly Rent": f"${cm:,.0f}", "Annual": f"${cm * 12:,.0f}", "$/SF/mo": f"${cm / build_sf:.2f}" if build_sf > 0 else "—"})
+        comparison_data.extend([
             {"Method": "1% Rule (of cost)", "Monthly Rent": f"${one_pct_monthly:,.0f}", "Annual": f"${one_pct_annual:,.0f}", "$/SF/mo": f"${one_pct_per_sf:.2f}"},
             {"Method": "5% Cap Rate", "Monthly Rent": f"${cap5_monthly:,.0f}", "Annual": f"${cap5_annual:,.0f}", "$/SF/mo": f"${cap5_per_sf:.2f}"},
             {"Method": "7% Cap Rate", "Monthly Rent": f"${cap7_monthly:,.0f}", "Annual": f"${cap7_annual:,.0f}", "$/SF/mo": f"${cap7_per_sf:.2f}"},
-        ]
+        ])
         st.dataframe(comparison_data, use_container_width=True, hide_index=True)
 
         if median_psf > 0:
