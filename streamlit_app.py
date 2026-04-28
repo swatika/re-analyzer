@@ -92,7 +92,9 @@ class AnalysisResult:
     street_permits: list = field(default_factory=list)
     zip_permits: list = field(default_factory=list)
     redfin_comps: list = field(default_factory=list)
+    neighborhood_comps: list = field(default_factory=list)
     market_stats: dict = field(default_factory=dict)
+    neighborhood_stats: dict = field(default_factory=dict)
     sources_status: dict = field(default_factory=dict)
     listing_status: dict = field(default_factory=dict)
 
@@ -196,7 +198,7 @@ class RedfinComps:
             f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=200'
             f'&ord=redfin-recommended-asc&page_number=1'
             f'&region_id={region_id}&region_type=2'
-            f'&sold_within_days=365&status=9&uipt=1&v=8&min_year_built=2020'
+            f'&sold_within_days=180&status=9&uipt=1&v=8&min_year_built=2020'
         )
         try:
             resp = requests.get(url, headers=headers, timeout=20)
@@ -245,6 +247,78 @@ class RedfinComps:
                 except (ValueError, ZeroDivisionError):
                     continue
             return comps
+        except Exception:
+            return []
+
+    def get_neighborhood_comps(self, lat: float, lon: float, radius_miles: float = 1.0) -> list[dict]:
+        """Get sold comps within a radius using lat/lon bounding box."""
+        # 1 degree lat ≈ 69 miles, 1 degree lon ≈ 60 miles at Austin's latitude
+        lat_offset = radius_miles / 69.0
+        lon_offset = radius_miles / 60.0
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        }
+        url = (
+            f'https://www.redfin.com/stingray/api/gis-csv?al=1&num_homes=200'
+            f'&ord=redfin-recommended-asc&page_number=1'
+            f'&lat_min={lat - lat_offset:.6f}&lat_max={lat + lat_offset:.6f}'
+            f'&lng_min={lon - lon_offset:.6f}&lng_max={lon + lon_offset:.6f}'
+            f'&sold_within_days=180&status=9&uipt=1&v=8&min_year_built=2020'
+        )
+        try:
+            resp = requests.get(url, headers=headers, timeout=20)
+            if resp.status_code != 200:
+                return []
+            lines = resp.text.strip().split('\n')
+            header_idx = None
+            for i, line in enumerate(lines):
+                if line.startswith('SALE TYPE') or line.startswith('"SALE TYPE'):
+                    header_idx = i
+                    break
+            if header_idx is None:
+                return []
+            reader = csv.DictReader(io.StringIO('\n'.join(lines[header_idx:])))
+            comps = []
+            for row in reader:
+                try:
+                    price_str = (row.get('PRICE') or '0').replace(',', '').replace('$', '')
+                    price = int(float(price_str)) if price_str else 0
+                    sqft_str = (row.get('SQUARE FEET') or '0').replace(',', '')
+                    sqft = int(float(sqft_str)) if sqft_str else 0
+                    year_str = row.get('YEAR BUILT') or '0'
+                    year = int(float(year_str)) if year_str else 0
+                    psf = round(price / sqft) if sqft > 0 else 0
+                    if price > 0 and year >= 2020:
+                        redfin_url = ''
+                        for key in row.keys():
+                            if key and 'URL' in key.upper():
+                                redfin_url = row[key] or ''
+                                break
+                        raw_addr = (row.get('ADDRESS') or '').strip()
+                        city = (row.get('CITY') or '').strip()
+                        state = (row.get('STATE OR PROVINCE') or 'TX').strip()
+                        zipcode = (row.get('ZIP OR POSTAL CODE') or '').strip()
+                        zillow_query = f"{raw_addr} {city} {state} {zipcode}".replace(' ', '-')
+                        comp_lat = float(row.get('LATITUDE') or 0)
+                        comp_lon = float(row.get('LONGITUDE') or 0)
+                        dist = 0
+                        if comp_lat and comp_lon:
+                            dist = ((comp_lat - lat) * 69) ** 2 + ((comp_lon - lon) * 60) ** 2
+                            dist = dist ** 0.5
+                        comps.append({
+                            'address': f"{raw_addr}, {city}",
+                            'price': price, 'sqft': sqft, 'psf': psf,
+                            'year_built': year,
+                            'sold_date': row.get('SOLD DATE') or '',
+                            'beds': row.get('BEDS') or '',
+                            'baths': row.get('BATHS') or '',
+                            'redfin_url': redfin_url,
+                            'zillow_url': f"https://www.zillow.com/homes/{zillow_query}_rb/",
+                            'distance_mi': round(dist, 2),
+                        })
+                except (ValueError, ZeroDivisionError):
+                    continue
+            return sorted(comps, key=lambda x: x.get('distance_mi', 99))
         except Exception:
             return []
 
@@ -473,7 +547,7 @@ def run_analysis(address: str, zip_code: str, street_name: str):
     result.zip_permits = permits_api.search_zip(zip_code)
     result.sources_status['permits'] = '✅' if result.street_permits or result.zip_permits else '⚠'
 
-    # Redfin
+    # Redfin — ZIP-wide comps
     result.redfin_comps = redfin_api.get_sold_comps(zip_code)
     if result.redfin_comps:
         psf_values = sorted([c["psf"] for c in result.redfin_comps if c.get("psf", 0) > 0])
@@ -492,6 +566,22 @@ def run_analysis(address: str, zip_code: str, street_name: str):
 
     # Listing status (active/pending/sold)
     result.listing_status = redfin_api.check_listing_status(address, zip_code)
+
+    # Neighborhood comps (1 mile radius)
+    lat, lon = geocode_address(address, zip_code)
+    if lat and lon:
+        result.neighborhood_comps = redfin_api.get_neighborhood_comps(lat, lon, radius_miles=1.0)
+        if result.neighborhood_comps:
+            n_psf = sorted([c["psf"] for c in result.neighborhood_comps if c.get("psf", 0) > 0])
+            if n_psf:
+                mid = len(n_psf) // 2
+                result.neighborhood_stats = {
+                    "median_psf": n_psf[mid],
+                    "avg_psf": round(sum(n_psf) / len(n_psf)),
+                    "min_psf": min(n_psf),
+                    "max_psf": max(n_psf),
+                    "count": len(n_psf),
+                }
 
     return result
 
@@ -1155,6 +1245,37 @@ if submitted and address and zip_code:
 
     # ── Comps Tab ──
     with tab_comps:
+        # Neighborhood comps (1 mile radius)
+        if result.neighborhood_comps:
+            n_stats = result.neighborhood_stats
+            st.subheader(f"📍 Neighborhood Comps — Within 1 Mile ({n_stats.get('count', 0)} sold)")
+            nc1, nc2, nc3, nc4 = st.columns(4)
+            nc1.metric("Median $/sf", f"${n_stats.get('median_psf', 0)}")
+            nc2.metric("Average $/sf", f"${n_stats.get('avg_psf', 0)}")
+            nc3.metric("Count", f"{n_stats.get('count', 0)}")
+            nc4.metric("Range", f"${n_stats.get('min_psf', 0)}–${n_stats.get('max_psf', 0)}")
+
+            n_data = []
+            for c in result.neighborhood_comps:
+                if c.get("psf", 0) > 0:
+                    n_data.append({
+                        "Address": c["address"],
+                        "Price": f"${c['price']:,}",
+                        "Size": f"{c['sqft']:,} sf",
+                        "$/sf": c["psf"],
+                        "Distance": f"{c.get('distance_mi', 0):.1f} mi",
+                        "Built": c.get("year_built", ""),
+                        "Sold": c.get("sold_date", ""),
+                        "Redfin": c.get("redfin_url", ""),
+                        "Zillow": c.get("zillow_url", ""),
+                    })
+            st.dataframe(n_data, use_container_width=True, hide_index=True,
+                         column_config={
+                             "Redfin": st.column_config.LinkColumn("Redfin", display_text="View"),
+                             "Zillow": st.column_config.LinkColumn("Zillow", display_text="View"),
+                         })
+            st.markdown("---")
+
         if result.redfin_comps:
             # Similar-size comps (per unit)
             sim_stats = getattr(result, 'similar_stats', {})
@@ -1188,7 +1309,7 @@ if submitted and address and zip_code:
 
             # All comps
             stats = result.market_stats
-            st.subheader(f"All New Construction — {zip_code} ({stats.get('count', 0)} comps)")
+            st.subheader(f"All New Construction — {zip_code} (past 6 months, {stats.get('count', 0)} comps)")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Median $/sf", f"${stats.get('median_psf', 0)}")
             c2.metric("Average $/sf", f"${stats.get('avg_psf', 0)}")
