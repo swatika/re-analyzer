@@ -1956,7 +1956,13 @@ if show_analysis and result is not None:
     all_median = result.market_stats.get("median_psf", 0)
     # Prefer similar-size median for market comparison
     median_psf = similar_median if similar_median > 0 else all_median
-    market_exit = median_psf if median_psf > 0 else exit_psf
+    # When Census fallback (no real comps), use user's exit price for market calcs
+    # Census median includes all homes (old, small) — not valid for new construction pricing
+    is_census_fallback = result.market_stats.get('source', '').startswith('Census') if result.market_stats else False
+    if is_census_fallback:
+        market_exit = exit_psf
+    else:
+        market_exit = median_psf if median_psf > 0 else exit_psf
 
     # Adjusted exit with market trend
     price_change_rate = price_decline / 100
@@ -2017,7 +2023,8 @@ if show_analysis and result is not None:
     active_permits = [p for p in result.street_permits if p.status == 'Active']
 
     # Market data risks
-    if median_psf > 0:
+    comp_count = result.market_stats.get('count', 0) if result.market_stats else 0
+    if median_psf > 0 and not is_census_fallback:
         exit_gap = ((exit_psf - median_psf) / median_psf) * 100
         if exit_gap > 20:
             risk_score += 30
@@ -2030,6 +2037,9 @@ if show_analysis and result is not None:
             risk_flags.append(("🟢", f"Exit ${exit_psf}/sf is **{exit_gap:.0f}% above** market median ${median_psf}/sf — Reasonable"))
         else:
             risk_flags.append(("🟢", f"Exit ${exit_psf}/sf is **at or below** market median ${median_psf}/sf — Conservative"))
+    elif is_census_fallback:
+        risk_score += 10
+        risk_flags.append(("🟡", f"**No Redfin comps** — Census estimate ${median_psf}/sf includes all homes (not just new construction). Verify exit price with actual comps."))
     else:
         risk_score += 30
         risk_flags.append(("🔴", "**No market comp data** — cannot validate exit assumptions. Redfin may be blocking this server."))
@@ -2056,7 +2066,7 @@ if show_analysis and result is not None:
         risk_score += 10
         risk_flags.append(("🟡", f"Delays adding ${delay_cost:,.0f} in holding costs"))
 
-    if breakeven_psf > median_psf and median_psf > 0:
+    if breakeven_psf > median_psf and median_psf > 0 and not is_census_fallback:
         risk_score += 20
         risk_flags.append(("🔴", f"Break-even (${breakeven_psf:.0f}/sf) is **above** market median (${median_psf}/sf)"))
 
@@ -2120,13 +2130,18 @@ if show_analysis and result is not None:
     c5.metric("Risk Score", f"{risk_score}/100")
 
     if median_psf > 0:
-        median_source = f"similar-size ({int(per_unit_sf):,} sf ±30%)" if similar_median > 0 else "all comps"
-        sim_count = getattr(result, 'similar_stats', {}).get('count', 0)
-        all_count = result.market_stats.get('count', 0)
-        st.info(f"📊 **Market Data:** Median for {median_source} is **${median_psf}/sf** "
-                f"({sim_count if similar_median > 0 else all_count} comps). "
-                f"All comps median: ${all_median}/sf ({all_count}). "
-                f"Your exit: ${exit_psf}/sf.")
+        if is_census_fallback:
+            st.info(f"📊 **Market Data:** No Redfin comps available. Census estimate: **${median_psf}/sf** "
+                    f"(includes all homes, not just new construction). "
+                    f"Your exit: ${exit_psf}/sf. Using your exit price for profit calculations.")
+        else:
+            median_source = f"similar-size ({int(per_unit_sf):,} sf ±30%)" if similar_median > 0 else "all comps"
+            sim_count = getattr(result, 'similar_stats', {}).get('count', 0)
+            all_count = result.market_stats.get('count', 0)
+            st.info(f"📊 **Market Data:** Median for {median_source} is **${median_psf}/sf** "
+                    f"({sim_count if similar_median > 0 else all_count} comps). "
+                    f"All comps median: ${all_median}/sf ({all_count}). "
+                    f"Your exit: ${exit_psf}/sf.")
 
     st.markdown("---")
 
