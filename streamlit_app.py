@@ -2492,7 +2492,7 @@ if show_analysis and result is not None:
         st.subheader("📊 Cost vs Price Profit Matrix")
         st.caption("Profit at different build cost and exit price combinations")
         matrix_build_costs = sorted(set([max(100, build_cost_psf - 50), max(125, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
-        matrix_exit_prices = sorted(set([max(300, exit_psf - 50), exit_psf - 25, exit_psf, exit_psf + 25]))
+        matrix_exit_prices = sorted(set([max(300, exit_psf - 75), max(325, exit_psf - 50), max(350, exit_psf - 25), exit_psf, exit_psf + 25, exit_psf + 50]))
 
         matrix_data = []
         for bc in matrix_build_costs:
