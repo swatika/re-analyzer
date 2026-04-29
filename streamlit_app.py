@@ -1839,7 +1839,7 @@ with st.sidebar:
             soft_cost_pct = st.number_input("Soft Costs (arch/eng/permits) (%)", min_value=0.0, max_value=30.0, value=10.4, step=0.5,
                                             help="Architecture, engineering, permits, surveys — as % of hard cost")
             arch_pct = eng_pct = permit_fee_pct = survey_pct = insurance_dev_pct = other_soft_pct = 0.0
-        soft_contingency = st.number_input("Soft Contingency ($)", min_value=0, value=20000, step=5000,
+        soft_contingency = st.number_input("Soft Contingency ($)", min_value=0, value=30000, step=5000,
                                            help="Fixed buffer for unexpected soft cost items")
 
         st.divider()
@@ -1881,7 +1881,7 @@ with st.sidebar:
                                    help="Listing + buyer agent commission")
         title_closing_pct = st.number_input("Title + Closing Costs (%)", min_value=0.0, max_value=3.0, value=1.3, step=0.1,
                                       help="Title insurance, escrow, recording fees")
-        seller_concessions_pct = st.number_input("Seller Concessions (%)", min_value=0.0, max_value=3.0, value=0.5, step=0.1,
+        seller_concessions_pct = st.number_input("Seller Concessions (%)", min_value=0.0, max_value=3.0, value=1.0, step=0.1,
                                            help="Buyer credits, repairs, warranty")
         exit_cost_pct = broker_fee_pct + title_closing_pct + seller_concessions_pct
         sale_hold_months = st.number_input('Sale Hold Period (months)', min_value=0.0, max_value=6.0, value=1.5, step=0.5,
