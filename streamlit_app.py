@@ -2367,7 +2367,7 @@ if show_analysis and result is not None:
 
                 val = {"Land": purchase_price, "Hard Cost": hc, "Hard Contingency": hc_cont,
                        "Soft + Arch": sc, "Soft Contingency": soft_contingency, "Carry": tcarry,
-                       "Sales Cost": tsc, "Exit Value": rev, "Total Cost": total, "**Profit**": profit}
+                       "Sales Cost": tsc, "Exit Value": rev, "Total Cost": total, "Profit": profit}
                 clean_label = row_label.replace("**", "")
                 row[f"${bc}/sf"] = f"${val[clean_label]:,.0f}"
             pf_data.append(row)
