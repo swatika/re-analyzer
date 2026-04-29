@@ -1146,7 +1146,13 @@ def _compute_hold_profit(purchase_price, build_sf, build_cost, exit_price, exit_
                          perm_mortgage_rate, amortization_years,
                          rent_per_unit, units, vacancy_pct, mgmt_fee_pct,
                          prop_tax_rate, taxable_value_psf, insurance_monthly,
-                         repairs_per_unit, common_utilities, leasing_reserve):
+                         repairs_per_unit, common_utilities, leasing_reserve,
+                         const_tax_rate=2.0, const_insurance_annual=6750,
+                         const_utilities_mo=450, const_misc_mo=325,
+                         carry_buffer_pct=12.5,
+                         staging_base=1500, staging_per_unit=3500,
+                         marketing_base=2000, marketing_per_unit=1500,
+                         warranty_per_unit=1750, sale_hold_months=1.5):
     """Recompute profit & equity multiple for a given build_cost/exit_price combo."""
     hc = build_cost * build_sf
     hcont = hc * (hard_contingency_pct / 100)
@@ -1155,8 +1161,27 @@ def _compute_hold_profit(purchase_price, build_sf, build_cost, exit_price, exit_
     tpc = purchase_price + tdc
 
     la = tdc * (ltv / 100)
-    ci = la * (interest_rate / 100) * (draw_factor / 100) * (build_months + delay_months) / 12
     lf = la * (loan_fee_pct / 100)
+
+    # Carry costs (matching main model: loan interest on land+dev)
+    cm = build_months + delay_months
+    ci = (purchase_price + tdc) * (ltv / 100) * (interest_rate / 100) * (draw_factor / 100) * cm / 12
+    ct = (purchase_price + 0.5 * tdc) * (const_tax_rate / 100) * cm / 12
+    cins = const_insurance_annual * cm / 12
+    cutil = const_utilities_mo * cm
+    cmisc = const_misc_mo * cm
+    csub = ci + ct + cins + cutil + cmisc
+    cbuf = csub * (carry_buffer_pct / 100)
+    tcarry = csub + cbuf
+
+    # Sales costs
+    rev = exit_price * build_sf
+    var_sales = rev * (exit_cost_pct / 100)
+    stg = staging_base + staging_per_unit * units
+    mkt = marketing_base + marketing_per_unit * units
+    war = warranty_per_unit * units
+    hds = tcarry / max(cm, 1) * sale_hold_months
+    tsales = var_sales + stg + mkt + war + hds
 
     if hold_months > 0:
         mpr = perm_mortgage_rate / 100 / 12
@@ -1184,9 +1209,8 @@ def _compute_hold_profit(purchase_price, build_sf, build_cost, exit_price, exit_
         mcf = mnoi - mds
         cum_cf = mcf * hold_months
         aeq = max(0, -cum_cf)
-        tei = purchase_price + ci + lf + aeq
+        tei = purchase_price + tcarry + lf + aeq
 
-        rev = exit_price * build_sf
         ec = rev * (exit_cost_pct / 100)
         nsbd = rev - ec
         nsad = nsbd - lbal
@@ -1195,9 +1219,8 @@ def _compute_hold_profit(purchase_price, build_sf, build_cost, exit_price, exit_
         profit = tcr - tei
         em = tcr / tei if tei > 0 else 0
     else:
-        tc = tpc + ci + lf + (exit_price * build_sf * exit_cost_pct / 100)
+        tc = tpc + lf + tcarry + tsales
         tei = tc
-        rev = exit_price * build_sf
         profit = rev - tc
         em = rev / tc if tc > 0 else 0
 
@@ -1217,6 +1240,12 @@ def generate_excel_bytes(
     exit_cost_pct, price_decline,
     split_soft, arch_pct, eng_pct, permit_fee_pct, survey_pct, insurance_dev_pct, other_soft_pct,
     broker_fee_pct, title_closing_pct, seller_concessions_pct,
+    # Carry/sales cost params
+    const_tax_rate, const_insurance_annual,
+    const_utilities, const_misc, carry_buffer_pct,
+    staging_base, staging_per_unit,
+    marketing_base, marketing_per_unit,
+    warranty_per_unit, sale_hold_months,
     # Computed values
     hard_cost, hard_contingency, soft_costs, total_dev_cost, total_project_cost,
     loan_amount, equity, construction_interest, loan_fees,
@@ -1457,6 +1486,12 @@ def generate_excel_bytes(
         taxable_value_psf=taxable_value_psf, insurance_monthly=insurance_monthly,
         repairs_per_unit=repairs_per_unit, common_utilities=common_utilities,
         leasing_reserve=leasing_reserve,
+        const_tax_rate=const_tax_rate, const_insurance_annual=const_insurance_annual,
+        const_utilities_mo=const_utilities, const_misc_mo=const_misc,
+        carry_buffer_pct=carry_buffer_pct,
+        staging_base=staging_base, staging_per_unit=staging_per_unit,
+        marketing_base=marketing_base, marketing_per_unit=marketing_per_unit,
+        warranty_per_unit=warranty_per_unit, sale_hold_months=sale_hold_months,
     )
 
     # Header row
@@ -1548,12 +1583,26 @@ def generate_excel_bytes(
         tdc_l = hc_l + hcont_l + sc_l + soft_contingency
         tpc_l = purchase_price + tdc_l
         la_l = tdc_l * (ltv / 100)
-        ci_l = la_l * (interest_rate / 100) * (draw_factor / 100) * (build_months + delay_months) / 12
         lf_l = la_l * (loan_fee_pct / 100)
-        carry_l = ci_l + lf_l
+        # Carry (matching main model: loan interest on land+dev)
+        cm = build_months + delay_months
+        ci_l = (purchase_price + tdc_l) * (ltv / 100) * (interest_rate / 100) * (draw_factor / 100) * cm / 12
+        ct_l = (purchase_price + 0.5 * tdc_l) * (const_tax_rate / 100) * cm / 12
+        cins_l = const_insurance_annual * cm / 12
+        cutil_l = const_utilities * cm
+        cmisc_l = const_misc * cm
+        csub_l = ci_l + ct_l + cins_l + cutil_l + cmisc_l
+        cbuf_l = csub_l * (carry_buffer_pct / 100)
+        tcarry_l = csub_l + cbuf_l
+        # Sales (matching main model)
         rev_l = exit_psf * build_sf
-        ec_l = rev_l * (exit_cost_pct / 100)
-        total_l = tpc_l + carry_l + ec_l
+        var_sales_l = rev_l * (exit_cost_pct / 100)
+        stg_l = staging_base + staging_per_unit * units
+        mkt_l = marketing_base + marketing_per_unit * units
+        war_l = warranty_per_unit * units
+        hds_l = tcarry_l / max(cm, 1) * sale_hold_months
+        tsc_l = var_sales_l + stg_l + mkt_l + war_l + hds_l
+        total_l = tpc_l + lf_l + tcarry_l + tsc_l
         profit_l = rev_l - total_l + (net_rental_income if hold_months > 0 else 0)
         return {
             "Land": purchase_price,
@@ -1561,8 +1610,8 @@ def generate_excel_bytes(
             f"Hard Cost Contingency ({hard_contingency_pct}%)": hcont_l,
             "Soft + Arch": sc_l + soft_contingency,
             "Soft Contingency": soft_contingency,
-            "Carry (Interest + Fees)": carry_l,
-            "Sales Cost": ec_l,
+            "Carry": tcarry_l,
+            "Sales Cost": tsc_l,
             "Total Cost": total_l,
             "Exit Value": rev_l,
             "Profit": profit_l,
@@ -2150,17 +2199,17 @@ if show_analysis and result is not None:
         verdict = "DON'T BUY"
         verdict_color = "red"
         verdict_emoji = "❌"
-        verdict_detail = f"Negative profit (\\${user_profit:,.0f}) even at your exit price of \\${exit_psf}/sf."
+        verdict_detail = f"Negative profit (${user_profit:,.0f}) even at your exit price of ${exit_psf}/sf."
     elif risk_score >= 50 and user_profit < 100000:
         verdict = "CAUTION"
         verdict_color = "orange"
         verdict_emoji = "⚠️"
-        verdict_detail = f"\\${user_profit:,.0f} profit at your exit, but risk score is high ({risk_score}/100). Thin margin for error."
+        verdict_detail = f"${user_profit:,.0f} profit at your exit, but risk score is high ({risk_score}/100). Thin margin for error."
     elif market_profit < 0 and user_profit > 0:
         verdict = "CAUTION"
         verdict_color = "orange"
         verdict_emoji = "⚠️"
-        verdict_detail = f"Your exit (\\${exit_psf}/sf) shows \\${user_profit:,.0f} profit, but market median (\\${adjusted_exit:.0f}/sf) shows a loss. Validate your exit price with actual new-construction comps."
+        verdict_detail = f"Your exit (${exit_psf}/sf) shows ${user_profit:,.0f} profit, but market median (${adjusted_exit:.0f}/sf) shows a loss. Validate your exit price with actual new-construction comps."
     elif risk_score >= 25 or user_profit < 100000 or median_psf == 0:
         verdict = "CAUTION"
         verdict_color = "orange"
@@ -2366,8 +2415,8 @@ if show_analysis and result is not None:
                 sc = hc * (soft_cost_pct / 100)
                 dev = hc + hc_cont + sc + soft_contingency
                 loan = dev * (ltv / 100)
-                # Carry
-                ci = loan * (interest_rate / 100) * (draw_factor / 100) * carry_months / 12
+                # Carry (loan interest uses land+dev as base, matching Karen Ave Excel)
+                ci = (purchase_price + dev) * (ltv / 100) * (interest_rate / 100) * (draw_factor / 100) * carry_months / 12
                 ct = (purchase_price + 0.5 * dev) * (const_tax_rate / 100) * carry_months / 12
                 cins = const_insurance_annual * carry_months / 12
                 cutil = const_utilities * carry_months
@@ -2411,8 +2460,11 @@ if show_analysis and result is not None:
         scenario_data = []
         for psf in test_psfs:
             revenue = psf * build_sf
-            exit_c = revenue * (exit_cost_pct / 100)
-            sc_cost = total_project_cost + total_interest + exit_c
+            # Recalculate sales cost for this exit price (variable costs change with revenue)
+            var_sc = revenue * (exit_cost_pct / 100)
+            hds_sc = total_carry / max(carry_months, 1) * sale_hold_months
+            sc_sales = var_sc + staging_cost + marketing_cost + warranty_cost + hds_sc
+            sc_cost = total_project_cost + loan_fees + total_carry + sc_sales
             profit = revenue - sc_cost + net_rental_income
             margin = (profit / sc_cost) * 100 if sc_cost > 0 else 0
             label = ""
@@ -2526,7 +2578,8 @@ if show_analysis and result is not None:
                 dev = hc + hc_cont + sc + soft_contingency
                 proj = purchase_price + dev
                 loan = dev * (ltv / 100)
-                ci = loan * (interest_rate / 100) * (draw_factor / 100) * carry_months / 12
+                # Carry (loan interest uses land+dev as base, matching Karen Ave Excel)
+                ci = (purchase_price + dev) * (ltv / 100) * (interest_rate / 100) * (draw_factor / 100) * carry_months / 12
                 lf = loan * (loan_fee_pct / 100)
                 # Carry costs
                 ct = (purchase_price + 0.5 * dev) * (const_tax_rate / 100) * carry_months / 12
@@ -2566,7 +2619,8 @@ if show_analysis and result is not None:
                 dev = hc + hc_cont + sc + soft_contingency
                 proj = purchase_price + dev
                 loan = dev * (ltv / 100)
-                ci = loan * (interest_rate / 100) * (draw_factor / 100) * dur / 12
+                # Carry (loan interest uses land+dev as base, matching Karen Ave Excel)
+                ci = (purchase_price + dev) * (ltv / 100) * (interest_rate / 100) * (draw_factor / 100) * dur / 12
                 lf = loan * (loan_fee_pct / 100)
                 ct = (purchase_price + 0.5 * dev) * (const_tax_rate / 100) * dur / 12
                 cins = const_insurance_annual * dur / 12
@@ -3220,6 +3274,12 @@ if show_analysis and result is not None:
                 insurance_dev_pct=insurance_dev_pct, other_soft_pct=other_soft_pct,
                 broker_fee_pct=broker_fee_pct, title_closing_pct=title_closing_pct,
                 seller_concessions_pct=seller_concessions_pct,
+                const_tax_rate=const_tax_rate, const_insurance_annual=const_insurance_annual,
+                const_utilities=const_utilities, const_misc=const_misc,
+                carry_buffer_pct=carry_buffer_pct,
+                staging_base=staging_base, staging_per_unit=staging_per_unit,
+                marketing_base=marketing_base, marketing_per_unit=marketing_per_unit,
+                warranty_per_unit=warranty_per_unit, sale_hold_months=sale_hold_months,
                 hard_cost=hard_cost, hard_contingency=hard_contingency, soft_costs=soft_costs,
                 total_dev_cost=total_dev_cost, total_project_cost=total_project_cost,
                 loan_amount=loan_amount, equity=equity,
