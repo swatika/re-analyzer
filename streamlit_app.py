@@ -1863,36 +1863,6 @@ with st.sidebar:
                                 help="Buffer for permitting delays, weather, supply issues")
 
         st.divider()
-        st.subheader("🏘️ Rental (Hold Strategy)")
-        rent_per_unit = st.number_input("Monthly Rent / Unit ($)", min_value=0, value=3950, step=100,
-                                      help="Expected monthly rent per unit after lease-up")
-        vacancy_pct = st.number_input("Vacancy / Credit Loss (%)", min_value=0.0, max_value=15.0, value=5.0, step=0.5,
-                                help="% of gross rent lost to vacancy and bad debt")
-        mgmt_fee_pct = st.number_input("Management Fee (%)", min_value=0.0, max_value=15.0, value=7.0, step=0.5,
-                                 help="Property management fee as % of effective rent")
-        perm_mortgage_rate = st.number_input("Permanent Mortgage Rate (%)", min_value=3.0, max_value=12.0, value=7.0, step=0.25,
-                                       help="Rate after construction loan converts to permanent")
-        amortization_years = st.number_input("Amortization (years)", min_value=15, max_value=30, value=30, step=5,
-                                            help="Loan payoff schedule length (longer = lower monthly payment)")
-        taxable_value_psf = st.number_input("Taxable Value ($/sf)", min_value=0, value=550, step=25,
-                                            help="Assessed value for property tax during hold")
-        prop_tax_rate = st.number_input("Property Tax Rate (%)", min_value=1.0, max_value=4.0, value=2.0, step=0.1,
-                                  help="Annual property tax rate (Austin is typically ~2%)")
-        insurance_monthly = st.number_input("Landlord Insurance ($/mo)", min_value=0, value=375, step=25,
-                                            help="Monthly hazard + liability insurance premium")
-        repairs_per_unit = st.number_input("Repairs Reserve ($/unit/mo)", min_value=0, value=150, step=25,
-                                           help="Monthly reserve per unit for maintenance and repairs")
-        common_utilities = st.number_input("Common Utilities / Misc ($/mo)", min_value=0, value=250, step=25,
-                                           help="Owner-paid utilities, landscaping, pest control, etc.")
-        leasing_reserve = st.number_input("Leasing / Turnover Reserve ($/mo)", min_value=0, value=250, step=25,
-                                          help="Reserve for tenant turnover, marketing, and lease-up costs")
-
-        st.divider()
-        st.subheader("📉 Market Risk")
-        price_decline = st.number_input("Annual Price Change (%)", min_value=-15.0, max_value=10.0, value=0.0, step=0.5,
-                                  help="Expected annual change in market prices (negative = decline)")
-
-        st.divider()
         st.subheader("🏗️ Construction Carry Costs")
         const_tax_rate = st.number_input("Construction Property Tax (%)", min_value=0.0, max_value=4.0, value=2.0, step=0.1,
                                     help="Annual property tax rate during construction period")
@@ -1926,6 +1896,36 @@ with st.sidebar:
                                               help='Additional marketing cost per unit')
         warranty_per_unit = st.number_input('Warranty Per Unit ($)', min_value=0, value=1750, step=250,
                                              help='Home warranty cost per unit')
+
+        st.divider()
+        st.subheader("📉 Market Risk")
+        price_decline = st.number_input("Annual Price Change (%)", min_value=-15.0, max_value=10.0, value=0.0, step=0.5,
+                                  help="Expected annual change in market prices (negative = decline)")
+
+        st.divider()
+        st.subheader("🏘️ Rental (Hold Strategy)")
+        rent_per_unit = st.number_input("Monthly Rent / Unit ($)", min_value=0, value=3950, step=100,
+                                      help="Expected monthly rent per unit after lease-up")
+        vacancy_pct = st.number_input("Vacancy / Credit Loss (%)", min_value=0.0, max_value=15.0, value=5.0, step=0.5,
+                                help="% of gross rent lost to vacancy and bad debt")
+        mgmt_fee_pct = st.number_input("Management Fee (%)", min_value=0.0, max_value=15.0, value=7.0, step=0.5,
+                                 help="Property management fee as % of effective rent")
+        perm_mortgage_rate = st.number_input("Permanent Mortgage Rate (%)", min_value=3.0, max_value=12.0, value=7.0, step=0.25,
+                                       help="Rate after construction loan converts to permanent")
+        amortization_years = st.number_input("Amortization (years)", min_value=15, max_value=30, value=30, step=5,
+                                            help="Loan payoff schedule length (longer = lower monthly payment)")
+        taxable_value_psf = st.number_input("Taxable Value ($/sf)", min_value=0, value=550, step=25,
+                                            help="Assessed value for property tax during hold")
+        prop_tax_rate = st.number_input("Property Tax Rate (%)", min_value=1.0, max_value=4.0, value=2.0, step=0.1,
+                                  help="Annual property tax rate (Austin is typically ~2%)")
+        insurance_monthly = st.number_input("Landlord Insurance ($/mo)", min_value=0, value=375, step=25,
+                                            help="Monthly hazard + liability insurance premium")
+        repairs_per_unit = st.number_input("Repairs Reserve ($/unit/mo)", min_value=0, value=150, step=25,
+                                           help="Monthly reserve per unit for maintenance and repairs")
+        common_utilities = st.number_input("Common Utilities / Misc ($/mo)", min_value=0, value=250, step=25,
+                                           help="Owner-paid utilities, landscaping, pest control, etc.")
+        leasing_reserve = st.number_input("Leasing / Turnover Reserve ($/mo)", min_value=0, value=250, step=25,
+                                          help="Reserve for tenant turnover, marketing, and lease-up costs")
 
         submitted = st.form_submit_button("🔍 Analyze — Should I Buy?", use_container_width=True, type="primary")
 
