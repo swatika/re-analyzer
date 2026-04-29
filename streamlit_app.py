@@ -1844,6 +1844,19 @@ with st.sidebar:
                                   help="Expected annual change in market prices (negative = decline)")
 
         st.divider()
+        st.subheader("🏗️ Construction Carry Costs")
+        const_tax_rate = st.slider("Construction Property Tax (%)", 0.0, 4.0, 2.0, step=0.1,
+                                    help="Annual property tax rate during construction period")
+        const_insurance_annual = st.number_input("Construction Insurance ($/yr)", min_value=0, value=6750, step=250,
+                                                  help="Builder's risk + liability insurance per year during construction")
+        const_utilities = st.number_input("Construction Utilities ($/mo)", min_value=0, value=450, step=50,
+                                           help="Water, electric, temp power during construction")
+        const_misc = st.number_input("Construction Misc ($/mo)", min_value=0, value=325, step=25,
+                                      help="Dumpster, portable toilet, misc during construction")
+        carry_buffer_pct = st.slider("Carry Cost Buffer (%)", 0, 25, 12, step=1,
+                                      help="Buffer on top of all carry costs for unexpected overruns")
+
+        st.divider()
         st.subheader("💸 Sale / Exit Costs")
         broker_fee_pct = st.slider("Broker / Agent Fee (%)", 0.0, 6.0, 3.0, step=0.5,
                                    help="Listing + buyer agent commission")
@@ -1852,6 +1865,18 @@ with st.sidebar:
         seller_concessions_pct = st.slider("Seller Concessions (%)", 0.0, 3.0, 0.5, step=0.25,
                                            help="Buyer credits, repairs, warranty")
         exit_cost_pct = broker_fee_pct + title_closing_pct + seller_concessions_pct
+        sale_hold_months = st.number_input('Sale Hold Period (months)', min_value=0.0, max_value=6.0, value=1.5, step=0.5,
+                                            help='Months property sits on market before closing')
+        staging_base = st.number_input('Staging Base ($)', min_value=0, value=1500, step=500,
+                                        help='Base staging cost (fixed)')
+        staging_per_unit = st.number_input('Staging Per Unit ($)', min_value=0, value=3500, step=500,
+                                            help='Additional staging cost per unit')
+        marketing_base = st.number_input('Marketing Base ($)', min_value=0, value=2000, step=500,
+                                          help='Photography, signage, MLS listing fees')
+        marketing_per_unit = st.number_input('Marketing Per Unit ($)', min_value=0, value=1500, step=500,
+                                              help='Additional marketing cost per unit')
+        warranty_per_unit = st.number_input('Warranty Per Unit ($)', min_value=0, value=1750, step=250,
+                                             help='Home warranty cost per unit')
 
         submitted = st.form_submit_button("🔍 Analyze — Should I Buy?", use_container_width=True, type="primary")
 
@@ -1898,6 +1923,26 @@ if show_analysis and result is not None:
     # Construction interest (draw factor applies during build only)
     construction_interest = loan_amount * (interest_rate / 100) * (draw_factor / 100) * (build_months + delay_months) / 12
     loan_fees = loan_amount * (loan_fee_pct / 100)
+
+    # Construction carry costs (during build, matching Karen Ave Excel)
+    carry_months = build_months + delay_months
+    carry_loan_interest = (purchase_price + total_dev_cost) * (ltv / 100) * (interest_rate / 100) * (draw_factor / 100) * carry_months / 12
+    carry_taxes = (purchase_price + 0.5 * total_dev_cost) * (const_tax_rate / 100) * carry_months / 12
+    carry_insurance = const_insurance_annual * carry_months / 12
+    carry_utilities = const_utilities * carry_months
+    carry_misc = const_misc * carry_months
+    carry_subtotal = carry_loan_interest + carry_taxes + carry_insurance + carry_utilities + carry_misc
+    carry_buffer = carry_subtotal * (carry_buffer_pct / 100)
+    total_carry = carry_subtotal + carry_buffer
+
+    # Sales costs (matching Karen Ave Excel)
+    user_revenue_est = exit_psf * build_sf
+    staging_cost = staging_base + staging_per_unit * units
+    marketing_cost = marketing_base + marketing_per_unit * units
+    warranty_cost = warranty_per_unit * units
+    variable_sales = user_revenue_est * (exit_cost_pct / 100)
+    holding_during_sale = total_carry / max(carry_months, 1) * sale_hold_months
+    total_sales_cost = variable_sales + staging_cost + marketing_cost + warranty_cost + holding_during_sale
 
     # Holding costs during rental period
     if hold_months > 0:
@@ -2285,6 +2330,50 @@ if show_analysis and result is not None:
 
     # ── Scenarios & Sensitivity Tab ──
     with tab_scenarios:
+        # ── Pro Forma Summary (matching Karen Ave Excel Page 1) ──
+        st.subheader(f"📋 Pro Forma Summary (${exit_psf}/sf Exit)")
+        st.caption("Full cost breakdown across multiple build cost scenarios")
+        pf_cost_levels = sorted(set([max(150, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
+
+        pf_data = []
+        for row_label in ["Land", "Hard Cost", "Hard Contingency", "Soft + Arch", "Soft Contingency", "Carry", "Sales Cost", "Exit Value", "Total Cost", "**Profit**"]:
+            row = {"Category": row_label}
+            for bc in pf_cost_levels:
+                hc = bc * build_sf
+                hc_cont = hc * (hard_contingency_pct / 100)
+                sc = hc * (soft_cost_pct / 100)
+                dev = hc + hc_cont + sc + soft_contingency
+                loan = dev * (ltv / 100)
+                # Carry
+                ci = loan * (interest_rate / 100) * (draw_factor / 100) * carry_months / 12
+                ct = (purchase_price + 0.5 * dev) * (const_tax_rate / 100) * carry_months / 12
+                cins = const_insurance_annual * carry_months / 12
+                cutil = const_utilities * carry_months
+                cmisc = const_misc * carry_months
+                csub = ci + ct + cins + cutil + cmisc
+                cbuf = csub * (carry_buffer_pct / 100)
+                tcarry = csub + cbuf
+                # Sales
+                rev = exit_psf * build_sf
+                ec = rev * (exit_cost_pct / 100)
+                stg = staging_base + staging_per_unit * units
+                mkt = marketing_base + marketing_per_unit * units
+                war = warranty_per_unit * units
+                hds = tcarry / max(carry_months, 1) * sale_hold_months
+                tsc = ec + stg + mkt + war + hds
+                lf = loan * (loan_fee_pct / 100)
+                total = purchase_price + hc + hc_cont + sc + soft_contingency + tcarry + tsc + lf
+                profit = rev - total
+
+                val = {"Land": purchase_price, "Hard Cost": hc, "Hard Contingency": hc_cont,
+                       "Soft + Arch": sc, "Soft Contingency": soft_contingency, "Carry": tcarry,
+                       "Sales Cost": tsc, "Exit Value": rev, "Total Cost": total, "**Profit**": profit}
+                clean_label = row_label.replace("**", "")
+                row[f"${bc}/sf"] = f"${val[clean_label]:,.0f}"
+            pf_data.append(row)
+        st.dataframe(pf_data, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
         st.subheader("Exit Scenario Matrix")
         # Build scenario table
         test_psfs = sorted(set([
@@ -2345,6 +2434,170 @@ if show_analysis and result is not None:
         if median_psf > 0:
             st.info(f"📍 Market median is **${median_psf}/sf** — your break-even is **${breakeven_psf:.0f}/sf**. "
                     f"You need the market to be **${breakeven_psf - median_psf:+.0f}/sf above median** to break even.")
+
+        # ── Carrying Cost Breakdown (During Construction) ──
+        st.markdown("---")
+        st.subheader("🏗️ Carrying Cost Breakdown (Construction Period)")
+        st.caption(f"Build duration: {carry_months} months ({build_months} build + {delay_months} delays)")
+        carry_data = [
+            {"Component": "Loan Interest", "Amount": f"${carry_loan_interest:,.0f}",
+             "Assumption": f"(Land+Dev) × {ltv}% LTC × {interest_rate}% × {draw_factor}% draw × {carry_months} mo ÷ 12"},
+            {"Component": "Property Taxes", "Amount": f"${carry_taxes:,.0f}",
+             "Assumption": f"(Land + 50% improvements) × {const_tax_rate}% × {carry_months} mo ÷ 12"},
+            {"Component": "Insurance", "Amount": f"${carry_insurance:,.0f}",
+             "Assumption": f"${const_insurance_annual:,}/yr × {carry_months} mo ÷ 12"},
+            {"Component": "Utilities", "Amount": f"${carry_utilities:,.0f}",
+             "Assumption": f"${const_utilities:,}/mo × {carry_months} mo"},
+            {"Component": "Misc", "Amount": f"${carry_misc:,.0f}",
+             "Assumption": f"${const_misc:,}/mo × {carry_months} mo"},
+            {"Component": f"Buffer ({carry_buffer_pct}%)", "Amount": f"${carry_buffer:,.0f}",
+             "Assumption": f"{carry_buffer_pct}% of carry subtotal"},
+            {"Component": "**TOTAL CARRY**", "Amount": f"**${total_carry:,.0f}**", "Assumption": ""},
+        ]
+        st.dataframe(carry_data, use_container_width=True, hide_index=True)
+
+        # ── Sales Cost Breakdown ──
+        st.markdown("---")
+        st.subheader("💸 Sales Cost Breakdown")
+        st.caption(f"Based on exit value of ${user_revenue_est:,.0f} ({exit_psf}/sf × {build_sf:,} sf)")
+        sales_data = [
+            {"Component": f"Realtor ({broker_fee_pct}%)", "Amount": f"${user_revenue_est * broker_fee_pct / 100:,.0f}"},
+            {"Component": f"Title + Closing ({title_closing_pct}%)", "Amount": f"${user_revenue_est * title_closing_pct / 100:,.0f}"},
+            {"Component": f"Concessions ({seller_concessions_pct}%)", "Amount": f"${user_revenue_est * seller_concessions_pct / 100:,.0f}"},
+            {"Component": f"Staging", "Amount": f"${staging_cost:,.0f}"},
+            {"Component": f"Marketing", "Amount": f"${marketing_cost:,.0f}"},
+            {"Component": f"Warranty", "Amount": f"${warranty_cost:,.0f}"},
+            {"Component": f"Holding During Sale ({sale_hold_months} mo)", "Amount": f"${holding_during_sale:,.0f}"},
+            {"Component": "**TOTAL SALES COST**", "Amount": f"**${total_sales_cost:,.0f}**"},
+        ]
+        st.dataframe(sales_data, use_container_width=True, hide_index=True)
+
+        # ── Soft Cost Breakdown ──
+        if split_soft:
+            st.markdown("---")
+            st.subheader("📐 Soft Cost Breakdown")
+            soft_data = [
+                {"Category": f"Architecture & Design ({arch_pct}%)", "Amount": f"${hard_cost * arch_pct / 100:,.0f}"},
+                {"Category": f"Engineering ({eng_pct}%)", "Amount": f"${hard_cost * eng_pct / 100:,.0f}"},
+                {"Category": f"Permits & Impact Fees ({permit_fee_pct}%)", "Amount": f"${hard_cost * permit_fee_pct / 100:,.0f}"},
+                {"Category": f"Surveys & Geotech ({survey_pct}%)", "Amount": f"${hard_cost * survey_pct / 100:,.0f}"},
+                {"Category": f"Builder's Risk Insurance ({insurance_dev_pct}%)", "Amount": f"${hard_cost * insurance_dev_pct / 100:,.0f}"},
+                {"Category": f"Other Soft ({other_soft_pct}%)", "Amount": f"${hard_cost * other_soft_pct / 100:,.0f}"},
+                {"Category": f"**TOTAL SOFT ({soft_cost_pct:.1f}%)**", "Amount": f"**${soft_costs:,.0f}**"},
+            ]
+            st.dataframe(soft_data, use_container_width=True, hide_index=True)
+
+        # ── Cost vs Price Profit Matrix ──
+        st.markdown("---")
+        st.subheader("📊 Cost vs Price Profit Matrix")
+        st.caption("Profit at different build cost and exit price combinations")
+        matrix_build_costs = sorted(set([max(150, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
+        matrix_exit_prices = sorted(set([max(300, exit_psf - 50), exit_psf - 25, exit_psf, exit_psf + 25]))
+
+        matrix_data = []
+        for bc in matrix_build_costs:
+            row = {"Build Cost": f"${bc}/sf"}
+            for ep in matrix_exit_prices:
+                hc = bc * build_sf
+                hc_cont = hc * (hard_contingency_pct / 100)
+                sc = hc * (soft_cost_pct / 100)
+                dev = hc + hc_cont + sc + soft_contingency
+                proj = purchase_price + dev
+                loan = dev * (ltv / 100)
+                ci = loan * (interest_rate / 100) * (draw_factor / 100) * carry_months / 12
+                lf = loan * (loan_fee_pct / 100)
+                # Carry costs
+                ct = (purchase_price + 0.5 * dev) * (const_tax_rate / 100) * carry_months / 12
+                cins = const_insurance_annual * carry_months / 12
+                cutil = const_utilities * carry_months
+                cmisc = const_misc * carry_months
+                csub = ci + ct + cins + cutil + cmisc
+                cbuf = csub * (carry_buffer_pct / 100)
+                tcarry = csub + cbuf
+                rev = ep * build_sf
+                ec = rev * (exit_cost_pct / 100)
+                stg = staging_base + staging_per_unit * units
+                mkt = marketing_base + marketing_per_unit * units
+                war = warranty_per_unit * units
+                hds = tcarry / max(carry_months, 1) * sale_hold_months
+                tsc = ec + stg + mkt + war + hds
+                total = purchase_price + dev + tcarry + tsc + lf
+                profit = rev - total
+                row[f"${ep}/sf"] = f"${profit:,.0f}"
+            matrix_data.append(row)
+        st.dataframe(matrix_data, use_container_width=True, hide_index=True)
+
+        # ── Timeline Sensitivity ──
+        st.markdown("---")
+        st.subheader("⏱️ Timeline Sensitivity — Profit by Duration")
+        st.caption(f"Exit at ${exit_psf}/sf, build cost ${build_cost_psf}/sf")
+        timeline_durations = list(range(max(6, build_months - 3), build_months + 5))
+        cost_scenarios = sorted(set([max(150, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
+
+        timeline_data = []
+        for dur in timeline_durations:
+            row = {"Duration": f"{dur} months"}
+            for bc in cost_scenarios:
+                hc = bc * build_sf
+                hc_cont = hc * (hard_contingency_pct / 100)
+                sc = hc * (soft_cost_pct / 100)
+                dev = hc + hc_cont + sc + soft_contingency
+                proj = purchase_price + dev
+                loan = dev * (ltv / 100)
+                ci = loan * (interest_rate / 100) * (draw_factor / 100) * dur / 12
+                lf = loan * (loan_fee_pct / 100)
+                ct = (purchase_price + 0.5 * dev) * (const_tax_rate / 100) * dur / 12
+                cins = const_insurance_annual * dur / 12
+                cutil = const_utilities * dur
+                cmisc = const_misc * dur
+                csub = ci + ct + cins + cutil + cmisc
+                cbuf = csub * (carry_buffer_pct / 100)
+                tcarry = csub + cbuf
+                rev = exit_psf * build_sf
+                ec = rev * (exit_cost_pct / 100)
+                stg = staging_base + staging_per_unit * units
+                mkt = marketing_base + marketing_per_unit * units
+                war = warranty_per_unit * units
+                hds = tcarry / max(dur, 1) * sale_hold_months
+                tsc = ec + stg + mkt + war + hds
+                total = purchase_price + dev + tcarry + tsc + lf
+                profit = rev - total
+                row[f"${bc}/sf"] = f"${profit:,.0f}"
+            timeline_data.append(row)
+        st.dataframe(timeline_data, use_container_width=True, hide_index=True)
+
+        # ── Rent Fallback / Hold Check ──
+        st.markdown("---")
+        st.subheader("🏠 Rent Fallback / Hold Check")
+        rent_gross_monthly = rent_per_unit * units
+        rent_gross_annual = rent_gross_monthly * 12
+        # Use $250/sf scenario total cost as baseline
+        baseline_total = purchase_price + total_dev_cost + total_carry + total_sales_cost + loan_fees
+        rent_yield = (rent_gross_annual / baseline_total * 100) if baseline_total > 0 else 0
+        rent_vs_exit = (rent_gross_annual / user_revenue_est * 100) if user_revenue_est > 0 else 0
+
+        if rent_yield >= 5.5:
+            rent_read = "✅ Reasonable fallback"
+        elif rent_yield >= 4.5:
+            rent_read = "⚠️ Thin fallback"
+        else:
+            rent_read = "❌ Weak rental coverage"
+
+        rf1, rf2, rf3, rf4 = st.columns(4)
+        rf1.metric("Units", units)
+        rf2.metric("Rent / Unit / Mo", f"${rent_per_unit:,}")
+        rf3.metric("Gross Annual Rent", f"${rent_gross_annual:,}")
+        rf4.metric("Rent Yield", f"{rent_yield:.1f}%", delta=rent_read)
+
+        st.markdown(f"""
+        | Metric | Value | Note |
+        |--------|-------|------|
+        | Gross Monthly Rent | ${rent_gross_monthly:,} | {units} units × ${rent_per_unit:,}/mo |
+        | Gross Annual Rent | ${rent_gross_annual:,} | Monthly × 12 |
+        | Annual Rent / Total Cost | {rent_yield:.1f}% | Gross rent ÷ all-in cost |
+        | Annual Rent / Exit Value | {rent_vs_exit:.1f}% | Gross rent ÷ exit value |
+        | **Assessment** | **{rent_read}** | ≥5.5% = Reasonable, ≥4.5% = Thin |
+        """)
 
     # ── Comps Tab ──
     with tab_comps:
