@@ -2333,7 +2333,7 @@ if show_analysis and result is not None:
         # ── Pro Forma Summary (matching Karen Ave Excel Page 1) ──
         st.subheader(f"📋 Pro Forma Summary (${exit_psf}/sf Exit)")
         st.caption("Full cost breakdown across multiple build cost scenarios")
-        pf_cost_levels = sorted(set([max(150, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
+        pf_cost_levels = sorted(set([max(100, build_cost_psf - 50), max(125, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
 
         pf_data = []
         for row_label in ["Land", "Hard Cost", "Hard Contingency", "Soft + Arch", "Soft Contingency", "Carry", "Sales Cost", "Exit Value", "Total Cost", "**Profit**"]:
@@ -2491,7 +2491,7 @@ if show_analysis and result is not None:
         st.markdown("---")
         st.subheader("📊 Cost vs Price Profit Matrix")
         st.caption("Profit at different build cost and exit price combinations")
-        matrix_build_costs = sorted(set([max(150, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
+        matrix_build_costs = sorted(set([max(100, build_cost_psf - 50), max(125, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
         matrix_exit_prices = sorted(set([max(300, exit_psf - 50), exit_psf - 25, exit_psf, exit_psf + 25]))
 
         matrix_data = []
@@ -2532,7 +2532,7 @@ if show_analysis and result is not None:
         st.subheader("⏱️ Timeline Sensitivity — Profit by Duration")
         st.caption(f"Exit at ${exit_psf}/sf, build cost ${build_cost_psf}/sf")
         timeline_durations = list(range(max(6, build_months - 3), build_months + 5))
-        cost_scenarios = sorted(set([max(150, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
+        cost_scenarios = sorted(set([max(100, build_cost_psf - 50), max(125, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
 
         timeline_data = []
         for dur in timeline_durations:
