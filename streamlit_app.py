@@ -2141,19 +2141,32 @@ if show_analysis and result is not None:
     # ══════════════════════════════════════════════
     st.markdown("---")
 
-    if risk_score >= 50 or (market_profit < 0 and user_profit < 0):
+    if user_profit < 0 and market_profit < 0:
         verdict = "DON'T BUY"
         verdict_color = "red"
         verdict_emoji = "❌"
-        verdict_detail = "Too many risk factors. This deal doesn't pencil at current market rates."
-    elif risk_score >= 25 or market_profit < 0 or user_profit < 100000 or median_psf == 0:
+        verdict_detail = "Negative profit at both your exit and market rates. This deal doesn't work."
+    elif user_profit < 0:
+        verdict = "DON'T BUY"
+        verdict_color = "red"
+        verdict_emoji = "❌"
+        verdict_detail = f"Negative profit (\\${user_profit:,.0f}) even at your exit price of \\${exit_psf}/sf."
+    elif risk_score >= 50 and user_profit < 100000:
+        verdict = "CAUTION"
+        verdict_color = "orange"
+        verdict_emoji = "⚠️"
+        verdict_detail = f"\\${user_profit:,.0f} profit at your exit, but risk score is high ({risk_score}/100). Thin margin for error."
+    elif market_profit < 0 and user_profit > 0:
+        verdict = "CAUTION"
+        verdict_color = "orange"
+        verdict_emoji = "⚠️"
+        verdict_detail = f"Your exit (\\${exit_psf}/sf) shows \\${user_profit:,.0f} profit, but market median (\\${adjusted_exit:.0f}/sf) shows a loss. Validate your exit price with actual new-construction comps."
+    elif risk_score >= 25 or user_profit < 100000 or median_psf == 0:
         verdict = "CAUTION"
         verdict_color = "orange"
         verdict_emoji = "⚠️"
         if median_psf == 0:
             verdict_detail = "No market data to validate assumptions. Cannot confirm this is a good deal — research comps manually."
-        elif market_profit < 0 and user_profit > 0:
-            verdict_detail = f"Your exit (\\${exit_psf}/sf) shows \\${user_profit:,.0f} profit, but market median (\\${adjusted_exit:.0f}/sf) shows a loss. Validate your exit price."
         else:
             verdict_detail = "Deal is marginal. Only proceed if you can negotiate better terms."
     else:
@@ -2194,7 +2207,7 @@ if show_analysis and result is not None:
     c1.metric("All-In Cost", f"${total_cost:,.0f}")
     c2.metric("Your Exit Revenue", f"${user_revenue:,.0f}")
     c3.metric("Your Profit", f"${user_profit:,.0f}")
-    c4.metric("Profit (Market)", f"${market_profit:,.0f}")
+    c4.metric(f"Profit @ Mkt \\${adjusted_exit:.0f}/sf", f"${market_profit:,.0f}")
     c5.metric("Break-Even", f"${breakeven_psf:.0f}/sf")
     c6.metric("Risk Score", f"{risk_score}/100")
 
