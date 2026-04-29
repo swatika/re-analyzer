@@ -2141,17 +2141,19 @@ if show_analysis and result is not None:
     # ══════════════════════════════════════════════
     st.markdown("---")
 
-    if risk_score >= 50 or market_profit < 0:
+    if risk_score >= 50 or (market_profit < 0 and user_profit < 0):
         verdict = "DON'T BUY"
         verdict_color = "red"
         verdict_emoji = "❌"
         verdict_detail = "Too many risk factors. This deal doesn't pencil at current market rates."
-    elif risk_score >= 25 or market_profit < 100000 or median_psf == 0:
+    elif risk_score >= 25 or market_profit < 0 or user_profit < 100000 or median_psf == 0:
         verdict = "CAUTION"
         verdict_color = "orange"
         verdict_emoji = "⚠️"
         if median_psf == 0:
             verdict_detail = "No market data to validate assumptions. Cannot confirm this is a good deal — research comps manually."
+        elif market_profit < 0 and user_profit > 0:
+            verdict_detail = f"Your exit (\\${exit_psf}/sf) shows \\${user_profit:,.0f} profit, but market median (\\${adjusted_exit:.0f}/sf) shows a loss. Validate your exit price."
         else:
             verdict_detail = "Deal is marginal. Only proceed if you can negotiate better terms."
     else:
@@ -2188,26 +2190,27 @@ if show_analysis and result is not None:
     """, unsafe_allow_html=True)
 
     # Key numbers
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("All-In Cost", f"${total_cost:,.0f}")
-    c2.metric("Market Exit Revenue", f"${adjusted_revenue:,.0f}")
-    c3.metric("Profit (Market)", f"${market_profit:,.0f}")
-    c4.metric("Break-Even", f"${breakeven_psf:.0f}/sf")
-    c5.metric("Risk Score", f"{risk_score}/100")
+    c2.metric("Your Exit Revenue", f"${user_revenue:,.0f}")
+    c3.metric("Your Profit", f"${user_profit:,.0f}")
+    c4.metric("Profit (Market)", f"${market_profit:,.0f}")
+    c5.metric("Break-Even", f"${breakeven_psf:.0f}/sf")
+    c6.metric("Risk Score", f"{risk_score}/100")
 
     if median_psf > 0:
         if is_census_fallback:
-            st.info(f"📊 **Market Data:** No Redfin comps available. Census estimate: **${median_psf}/sf** "
+            st.info(f"📊 **Market Data:** No Redfin comps available. Census estimate: **\\${median_psf}/sf** "
                     f"(includes all homes, not just new construction). "
-                    f"Your exit: ${exit_psf}/sf. Using your exit price for profit calculations.")
+                    f"Your exit: \\${exit_psf}/sf. Using your exit price for profit calculations.")
         else:
             median_source = f"similar-size ({int(per_unit_sf):,} sf ±30%)" if similar_median > 0 else "all comps"
             sim_count = getattr(result, 'similar_stats', {}).get('count', 0)
             all_count = result.market_stats.get('count', 0)
-            st.info(f"📊 **Market Data:** Median for {median_source} is **${median_psf}/sf** "
+            st.info(f"📊 **Market Data:** Median for {median_source} is **\\${median_psf}/sf** "
                     f"({sim_count if similar_median > 0 else all_count} comps). "
-                    f"All comps median: ${all_median}/sf ({all_count}). "
-                    f"Your exit: ${exit_psf}/sf.")
+                    f"All comps median: \\${all_median}/sf ({all_count}). "
+                    f"Your exit: \\${exit_psf}/sf.")
 
     st.markdown("---")
 
@@ -2323,8 +2326,8 @@ if show_analysis and result is not None:
             """)
 
             if monthly_cf_after_debt < 0:
-                st.warning(f"⚠️ **Negative cash flow** of ${monthly_cf_after_debt:,.0f}/mo during hold period. "
-                          f"You'll need ${abs(monthly_cf_after_debt * hold_months):,.0f} additional equity to carry this property.")
+                st.warning(f"⚠️ **Negative cash flow** of \\${monthly_cf_after_debt:,.0f}/mo during hold period. "
+                          f"You'll need \\${abs(monthly_cf_after_debt * hold_months):,.0f} additional equity to carry this property.")
         else:
             rc1, rc2, rc3 = st.columns(3)
             rc1.metric("Annual Rent (if held)", f"${annual_rent:,.0f}")
@@ -2438,8 +2441,8 @@ if show_analysis and result is not None:
                       x="Exit $/sf", y="Profit")
 
         if median_psf > 0:
-            st.info(f"📍 Market median is **${median_psf}/sf** — your break-even is **${breakeven_psf:.0f}/sf**. "
-                    f"You need the market to be **${breakeven_psf - median_psf:+.0f}/sf above median** to break even.")
+            st.info(f"📍 Market median is **\\${median_psf}/sf** — your break-even is **\\${breakeven_psf:.0f}/sf**. "
+                    f"You need the market to be **\\${breakeven_psf - median_psf:+.0f}/sf above median** to break even.")
 
         # ── Carrying Cost Breakdown (During Construction) ──
         st.markdown("---")
@@ -2465,7 +2468,7 @@ if show_analysis and result is not None:
         # ── Sales Cost Breakdown ──
         st.markdown("---")
         st.subheader("💸 Sales Cost Breakdown")
-        st.caption(f"Based on exit value of ${user_revenue_est:,.0f} ({exit_psf}/sf × {build_sf:,} sf)")
+        st.caption(f"Based on exit value of \\${user_revenue_est:,.0f} ({exit_psf}/sf × {build_sf:,} sf)")
         sales_data = [
             {"Component": f"Realtor ({broker_fee_pct}%)", "Amount": f"${user_revenue_est * broker_fee_pct / 100:,.0f}"},
             {"Component": f"Title + Closing ({title_closing_pct}%)", "Amount": f"${user_revenue_est * title_closing_pct / 100:,.0f}"},
@@ -2536,7 +2539,7 @@ if show_analysis and result is not None:
         # ── Timeline Sensitivity ──
         st.markdown("---")
         st.subheader("⏱️ Timeline Sensitivity — Profit by Duration")
-        st.caption(f"Exit at ${exit_psf}/sf, build cost ${build_cost_psf}/sf")
+        st.caption(f"Exit at \\${exit_psf}/sf, build cost \\${build_cost_psf}/sf")
         timeline_durations = list(range(max(6, build_months - 3), build_months + 5))
         cost_scenarios = sorted(set([max(100, build_cost_psf - 50), max(125, build_cost_psf - 25), build_cost_psf, build_cost_psf + 25, build_cost_psf + 50]))
 
@@ -2814,7 +2817,7 @@ if show_analysis and result is not None:
         st.dataframe(comparison_data, use_container_width=True, hide_index=True)
 
         if median_psf > 0:
-            st.caption(f"💡 Cap rate estimates based on comps median ${median_psf}/sf × {build_sf:,} sf = ${estimated_value:,.0f} estimated value")
+            st.caption(f"💡 Cap rate estimates based on comps median \\${median_psf}/sf × {build_sf:,} sf = \\${estimated_value:,.0f} estimated value")
         else:
             st.caption("💡 Cap rate estimates based on total project cost (no comp data available)")
 
@@ -3342,11 +3345,11 @@ elif submitted and not show_analysis:
     col4.metric("Break-Even", f"${breakeven_psf:.0f}/sf")
 
     if user_profit > 200000:
-        st.success(f"✅ STRONG — ${user_profit:,.0f} profit at ${exit_psf}/sf exit")
+        st.success(f"✅ STRONG — \\${user_profit:,.0f} profit at \\${exit_psf}/sf exit")
     elif user_profit > 50000:
-        st.warning(f"⚠️ MARGINAL — ${user_profit:,.0f} profit, sensitive to delays/overruns")
+        st.warning(f"⚠️ MARGINAL — \\${user_profit:,.0f} profit, sensitive to delays/overruns")
     else:
-        st.error(f"❌ WEAK/LOSS — ${user_profit:,.0f} at ${exit_psf}/sf exit")
+        st.error(f"❌ WEAK/LOSS — \\${user_profit:,.0f} at \\${exit_psf}/sf exit")
 
     # Cost breakdown
     st.subheader("💰 Cost Breakdown")
