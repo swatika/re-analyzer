@@ -2042,10 +2042,10 @@ if show_analysis and result is not None:
         # Total equity invested = Land + Construction Interest + Loan Fees + Additional Equity for negative CF
         cumulative_cf = monthly_cf_after_debt * hold_months
         additional_equity_needed = max(0, -cumulative_cf)
-        total_equity_invested = purchase_price + construction_interest + loan_fees + additional_equity_needed
+        total_equity_invested = purchase_price + loan_fees + total_carry + staging_cost + marketing_cost + warranty_cost + additional_equity_needed
 
         # At sale: pay off loan balance, keep net proceeds + any positive rental CF
-        net_sale_before_debt = user_revenue - exit_costs_user
+        net_sale_before_debt = user_revenue - exit_costs_user - staging_cost - marketing_cost - warranty_cost - holding_during_sale
         net_sale_after_debt = net_sale_before_debt - loan_balance_after_hold
         positive_rental_cf = max(0, cumulative_cf)
         total_cash_returned = net_sale_after_debt + positive_rental_cf
@@ -2054,16 +2054,19 @@ if show_analysis and result is not None:
         equity_multiple = total_cash_returned / total_equity_invested if total_equity_invested > 0 else 0
 
         # Market-based profit
-        net_market_sale = adjusted_revenue - exit_costs_market
+        net_market_sale = adjusted_revenue - exit_costs_market - staging_cost - marketing_cost - warranty_cost - holding_during_sale
         market_net_after_debt = net_market_sale - loan_balance_after_hold
         market_cash_returned = market_net_after_debt + positive_rental_cf
         market_profit = market_cash_returned - total_equity_invested
     else:
-        # Simple flip model
-        total_cost = total_project_cost + construction_interest + loan_fees + exit_costs_user
+        # Simple flip model (includes carry + sales costs from Karen Ave Excel)
+        # Note: total_carry already includes loan interest, so don't add construction_interest separately
+        total_cost = total_project_cost + loan_fees + total_carry + total_sales_cost
         total_equity_invested = total_cost
         user_profit = user_revenue - total_cost
-        market_profit = adjusted_revenue - (total_project_cost + construction_interest + loan_fees + exit_costs_market)
+        exit_costs_market_val = adjusted_revenue * (exit_cost_pct / 100)
+        market_sales_cost = exit_costs_market_val + staging_cost + marketing_cost + warranty_cost + holding_during_sale
+        market_profit = adjusted_revenue - (total_project_cost + loan_fees + total_carry + market_sales_cost)
         equity_multiple = user_revenue / total_cost if total_cost > 0 else 0
         cumulative_cf = 0
         additional_equity_needed = 0
@@ -2247,9 +2250,11 @@ if show_analysis and result is not None:
             {soft_cost_line}
             | Soft Contingency | ${soft_contingency:,.0f} |
             | **Non-Land Dev Cost** | **${total_dev_cost:,.0f}** |
-            | Construction Debt ({ltv}% LTV) | ${loan_amount:,.0f} |
-            | Construction Interest ({interest_rate}%) | ${construction_interest:,.0f} |
-            | Construction Loan Fees ({loan_fee_pct}%) | ${loan_fees:,.0f} |
+            | Construction Debt ({ltv}% LTC) | ${loan_amount:,.0f} |
+            | Carry Costs ({carry_months} mo) | ${total_carry:,.0f} |
+            | Loan Fees ({loan_fee_pct}%) | ${loan_fees:,.0f} |
+            | Sales Costs | ${total_sales_cost:,.0f} |
+            | **ALL-IN COST** | **${total_cost:,.0f}** |
             """)
 
         with c2:
@@ -2259,8 +2264,9 @@ if show_analysis and result is not None:
                 | Item | Amount |
                 |------|--------|
                 | Land Equity | ${purchase_price:,.0f} |
-                | Construction Interest | ${construction_interest:,.0f} |
+                | Carry Costs | ${total_carry:,.0f} |
                 | Loan Fees | ${loan_fees:,.0f} |
+                | Staging/Marketing/Warranty | ${staging_cost + marketing_cost + warranty_cost:,.0f} |
                 | Additional Equity (negative CF) | ${additional_equity_needed:,.0f} |
                 | **Total Equity Invested** | **${total_equity_invested:,.0f}** |
                 | | |
